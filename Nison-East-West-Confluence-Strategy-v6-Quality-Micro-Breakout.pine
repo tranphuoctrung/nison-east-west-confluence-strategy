@@ -1,0 +1,1532 @@
+//@version=6
+strategy("Nison East-West Confluence Strategy v6 - Quality Micro Breakout", overlay=true, pyramiding=0, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.0, slippage=0, process_orders_on_close=true, max_labels_count=500, max_lines_count=500)
+
+// ============================================================================
+// 1. INPUT SETTINGS
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 1.1 HTF TREND SETTINGS
+// ----------------------------------------------------------------------------
+
+tf1 = input.timeframe("60", "HTF1 - Khung xu huong 1")
+tf2 = input.timeframe("240", "HTF2 - Khung xu huong 2")
+
+emaFastLen = input.int(50, "EMA nhanh HTF", minval=1)
+emaSlowLen = input.int(200, "EMA cham HTF", minval=1)
+
+requireHTFCloseSide = input.bool(false, "Yeu cau HTF close cung phia EMA nhanh")
+
+htfFilterMode = input.string("Khong loc HTF", "Quy tac loc HTF", options=["Ca 2 HTF dong thuan", "It nhat 1 HTF dong thuan", "Chi HTF1", "Chi HTF2", "Khong loc HTF"])
+
+tradeMode = input.string("Theo xu huong HTF", "Che do giao dich", options=["Theo xu huong HTF", "Dao chieu nguoc HTF"])
+
+// ----------------------------------------------------------------------------
+// 1.2 SUPPORT / RESISTANCE SETTINGS
+// ----------------------------------------------------------------------------
+
+pivotLeftBars = input.int(5, "So nen ben trai de xac dinh Pivot", minval=1)
+pivotRightBars = input.int(5, "So nen ben phai de xac nhan Pivot", minval=1)
+
+maxSRAgeBars = input.int(120, "So nen toi da S/R con hieu luc, 0 = khong gioi han", minval=0)
+
+atrLen = input.int(14, "ATR Length", minval=1)
+zoneATR = input.float(0.75, "Do rong vung S/R theo ATR", minval=0.0, step=0.05)
+
+// Nison: "S/R duoc test nhieu lan = manh hon S/R don le. Three Mountain/Three River = test 3 lan"
+useSRMultiTest = input.bool(false, "S/R: Yeu cau vung S/R da duoc test nhieu lan (Nison)")
+srMinTouches   = input.int(2, "S/R: So lan gia cham vung toi thieu", minval=1, maxval=5)
+srTouchLookback = input.int(60, "S/R: So nen de dem so lan test", minval=10, maxval=200)
+
+// ----------------------------------------------------------------------------
+// 1.3 REVERSAL PATTERN SETTINGS
+// ----------------------------------------------------------------------------
+
+useSingleCandlePattern = input.bool(true, "Reversal: Single Candle")
+useThreeBarPattern = input.bool(false, "Reversal: Three Bar Reversal")
+useMorningEveningPattern = input.bool(false, "Reversal: Morning / Evening Star")
+useRejectionClusterPattern = input.bool(false, "Reversal: Rejection Cluster")
+
+multiPatternEntryMode = input.string("Vao ngay khi mau hinh hoan thanh", "Cach vao lenh voi cum nen dao chieu", options=["Vao ngay khi mau hinh hoan thanh", "Can them nen xac nhan"])
+
+wickRatio = input.float(2.0, "Single Candle: Ty le bong nen toi thieu", minval=1.0, step=0.1)
+maxBodyPct = input.float(0.40, "Single Candle: Than nen toi da so voi range", minval=0.05, maxval=1.0, step=0.05)
+maxOppWickPct = input.float(0.30, "Single Candle: Bong nguoc toi da so voi range", minval=0.0, maxval=1.0, step=0.05)
+
+threeBarRequireBreakHighLow = input.bool(true, "Three Bar: Yeu cau nen 3 pha High/Low nen 2")
+
+starFirstBodyATR = input.float(0.60, "Star: Than nen dau toi thieu theo ATR", minval=0.0, step=0.05)
+starMiddleMaxBodyPct = input.float(0.25, "Star: Than nen giua toi da so voi range", minval=0.05, maxval=1.0, step=0.05)
+starCloseIntoFirstBodyPct = input.float(0.65, "Star: Nen 3 dong vao than nen 1 toi thieu", minval=0.1, maxval=1.0, step=0.05)
+// Nison: "Gap truoc/sau ngoi sao giup tang do tin cay cua Morning/Evening Star"
+starRequireGap = input.bool(true, "Star: Yeu cau gap giua nen 1 va ngoi sao (Nison: gap tang WR)")
+// Nison: "Than Hammer/ShootingStar phai o PHAN TREN/DUOI range, bong nguoc >= 2x than"
+hammerBodyPosPct = input.float(0.45, "Hammer: Vi tri than nen toi thieu tu day range (Nison)", minval=0.0, maxval=0.80, step=0.05)
+
+clusterLookbackBars = input.int(4, "Cluster: So nen trong cum", minval=3, maxval=5)
+clusterMinRejectBars = input.int(2, "Cluster: So nen rejection toi thieu", minval=1, maxval=5)
+clusterWickPct = input.float(0.45, "Cluster: Ty le rau rejection toi thieu", minval=0.1, maxval=1.0, step=0.05)
+
+// ----------------------------------------------------------------------------
+// 1.4 CONTINUATION PULLBACK SETTINGS
+// ----------------------------------------------------------------------------
+
+useContinuationPattern = input.bool(true, "Continuation: Bat Pullback / Retest Setup")
+
+contEntryMode = input.string("Ca hai", "Continuation: Kieu vao lenh", options=["Breakout khoi cum", "Early rejection tai EMA/SR", "Ca hai"])
+
+contFastEmaLen = input.int(20, "Continuation: EMA nhanh LTF", minval=1)
+contSlowEmaLen = input.int(50, "Continuation: EMA cham LTF", minval=1)
+
+contImpulseLookback = input.int(6, "Continuation: So nen do impulse truoc pullback", minval=3, maxval=20)
+contMinImpulseATR = input.float(1.2, "Continuation: Impulse toi thieu theo ATR", minval=0.1, step=0.1)
+
+contPullbackBars = input.int(4, "Continuation: So nen trong cum pullback", minval=2, maxval=8)
+contMaxClusterRangeATR = input.float(1.2, "Continuation: Range cum pullback toi da theo ATR", minval=0.2, step=0.1)
+contMaxRetrace = input.float(0.50, "Continuation: Pullback hoi toi da so voi impulse", minval=0.1, maxval=1.0, step=0.01)
+
+contRequireEmaRetest = input.bool(true, "Continuation: Yeu cau pullback cham EMA")
+contAllowSRRetest = input.bool(true, "Continuation: Cho phep retest S/R")
+
+contConfirmBodyPct = input.float(0.55, "Continuation: Than nen breakout toi thieu so voi range", minval=0.1, maxval=1.0, step=0.05)
+
+contUseRoomFilter = input.bool(true, "Continuation: Yeu cau room toi can doi dien")
+contMinRoomR = input.float(1.0, "Continuation: Room toi thieu theo R", minval=0.0, step=0.1)
+
+contMaxBreakoutDistanceATR = input.float(0.50, "Continuation: Khoang cach breakout toi da theo ATR", minval=0.0, step=0.05)
+
+contRequireEmaSlope = input.bool(true, "Continuation: Yeu cau EMA nhanh co do doc")
+contEmaSlopeBars = input.int(3, "Continuation: So nen do doc EMA", minval=1, maxval=20)
+
+contEarlyRejectionWickPct = input.float(0.35, "Continuation Early: Rau rejection toi thieu", minval=0.1, maxval=1.0, step=0.05)
+contEarlyCloseBeyondPrev = input.bool(true, "Continuation Early: Dong cua tot hon nen truoc")
+
+// ----------------------------------------------------------------------------
+// 1.5 MICRO COMPRESSION BREAKOUT SETTINGS
+// ----------------------------------------------------------------------------
+// Module bắt cụm nến nhỏ đi ngang/nén giá rồi phá vỡ.
+// Bản này mặc định đã siết chặt hơn để hạn chế các lệnh SELL sát support
+// hoặc BUY sát resistance.
+
+useMicroBreakout = input.bool(true, "Micro Breakout: Bat cum nen nen gia")
+
+microBars = input.int(4, "Micro: So nen trong cum nen", minval=3, maxval=8)
+
+microMaxRangeATR = input.float(1.2, "Micro: Range cum toi da theo ATR", minval=0.2, step=0.1)
+
+microBreakoutBodyPct = input.float(0.50, "Micro: Than nen breakout toi thieu", minval=0.1, maxval=1.0, step=0.05)
+
+microMaxBreakoutDistanceATR = input.float(0.50, "Micro: Khoang cach breakout toi da theo ATR", minval=0.0, step=0.05)
+
+microRequireHTFDirection = input.bool(true, "Micro: Yeu cau cung huong HTF")
+
+microRequireEMADirection = input.bool(true, "Micro: Yeu cau cung huong EMA LTF")
+
+microUseRoomFilter = input.bool(true, "Micro: Yeu cau room toi can doi dien")
+microMinRoomR = input.float(1.5, "Micro: Room toi thieu theo R", minval=0.0, step=0.1)
+
+microAvoidOppositeSR = input.bool(false, "Micro: Tranh pha vo sat S/R nguoc huong")
+
+// ----------------------------------------------------------------------------
+// 1.6 CONFIRMATION SETTINGS
+// ----------------------------------------------------------------------------
+
+confirmMode = input.string("Close vuot than nen", "Kieu xac nhan Single Candle", options=["Close vuot High/Low", "Close vuot than nen"])
+confirmWithinBars = input.int(2, "So nen cho xac nhan sau setup Single Candle", minval=1, maxval=5)
+
+confirmedBarOnly = input.bool(true, "Chi vao lenh khi nen dong")
+
+useStrongConfirmCandle = input.bool(false, "Yeu cau nen xac nhan than dai rau ngan")
+confirmMinBodyPct = input.float(0.60, "Nen xac nhan: than toi thieu so voi range", minval=0.10, maxval=1.00, step=0.05)
+confirmMaxUpperWickPct = input.float(0.25, "Nen xac nhan: rau tren toi da so voi range", minval=0.00, maxval=1.00, step=0.05)
+confirmMaxLowerWickPct = input.float(0.25, "Nen xac nhan: rau duoi toi da so voi range", minval=0.00, maxval=1.00, step=0.05)
+
+// ----------------------------------------------------------------------------
+// 1.7 RISK / REWARD SETTINGS
+// ----------------------------------------------------------------------------
+
+rr1 = input.float(2.0, "TP1 Risk:Reward", minval=0.1, step=0.1)
+rr2 = input.float(3.0, "TP2 Risk:Reward", minval=0.1, step=0.1)
+
+strategyTPChoice = input.string("TP1", "Backtest chot loi tai", options=["TP1", "TP2"])
+
+// Breakeven Trail: khi gia dat TP1 → tu dong doi SL ve breakeven → tiep tuc chay den TP2
+// Hieu qua: giu WR cao cua TP1 nhung huong loi nhuan RR TP2
+useBeTrail = input.bool(false, "Breakeven Trail: SL ve BE khi dat TP1, thoat o TP2 (tang RR ma giu WR)")
+
+slBufferATR = input.float(0.10, "SL buffer theo ATR", minval=0.0, step=0.05)
+minRiskTicks = input.int(2, "Risk toi thieu theo tick", minval=1)
+
+// ----------------------------------------------------------------------------
+// 1.8 RSI SETTINGS
+// ----------------------------------------------------------------------------
+
+rsiLen = input.int(14, "RSI Length", minval=1)
+
+rsiEntryGateMode = input.string("Chan qua mua/qua ban", "Che do loc RSI entry", options=["Khong loc RSI entry", "Chan qua mua/qua ban", "Chi giao dich qua mua/qua ban"])
+
+rsiOversold = input.float(30.0, "RSI qua ban", minval=1, maxval=99, step=0.5)
+rsiOverbought = input.float(70.0, "RSI qua mua", minval=1, maxval=99, step=0.5)
+
+useRSIFilter = input.bool(false, "Dung RSI trong diem hoi tu")
+rsiMode = input.string("Pullback + slope", "Che do RSI diem hoi tu", options=["Pullback + slope", "Cross 50", "Either"])
+rsiMid = input.float(50.0, "RSI midline", minval=1, maxval=99, step=0.5)
+
+rsiBuyMin = input.float(40.0, "BUY RSI min cho diem hoi tu", minval=1, maxval=99, step=0.5)
+rsiBuyMax = input.float(60.0, "BUY RSI max cho diem hoi tu", minval=1, maxval=99, step=0.5)
+
+rsiSellMin = input.float(40.0, "SELL RSI min cho diem hoi tu", minval=1, maxval=99, step=0.5)
+rsiSellMax = input.float(60.0, "SELL RSI max cho diem hoi tu", minval=1, maxval=99, step=0.5)
+
+// ----------------------------------------------------------------------------
+// 1.9 MACD SETTINGS
+// ----------------------------------------------------------------------------
+
+useMACDFilter = input.bool(true, "Dung MACD trong diem hoi tu")
+
+macdFastLen = input.int(12, "MACD Fast Length", minval=1)
+macdSlowLen = input.int(26, "MACD Slow Length", minval=1)
+macdSignalLen = input.int(9, "MACD Signal Length", minval=1)
+
+macdMode = input.string("Histogram direction", "Che do MACD diem hoi tu", options=["Histogram direction", "Histogram peak turn", "MACD cross", "Either"])
+
+macdHistEntryGateMode = input.string("Khong loc MACD Histogram entry", "Che do loc MACD Histogram entry", options=["Khong loc MACD Histogram entry", "Chi BUY day Hist / SELL dinh Hist"])
+
+// ----------------------------------------------------------------------------
+// 1.10 FIBONACCI SETTINGS
+// ----------------------------------------------------------------------------
+
+useFibFilter = input.bool(false, "Dung Fibonacci trong diem hoi tu")
+
+fibRatioFrom = input.float(0.50, "Fib zone tu", minval=0.0, maxval=1.0, step=0.001)
+fibRatioTo = input.float(0.618, "Fib zone den", minval=0.0, maxval=1.0, step=0.001)
+
+maxFibSwingAgeBars = input.int(160, "So nen toi da swing Fibonacci con hieu luc, 0 = khong gioi han", minval=0)
+
+showFibZones = input.bool(false, "Hien thi vung Fibonacci")
+
+// ----------------------------------------------------------------------------
+// 1.11 CONFLUENCE + QUALITY FILTERS
+// ----------------------------------------------------------------------------
+
+westernMinScore = input.int(1, "Diem hoi tu Tay toi thieu RSI/MACD/Fibo", minval=0, maxval=3)
+
+useRoomFilter = input.bool(false, "Filter chung: Yeu cau khoang trong toi can doi dien")
+minRoomR = input.float(1.20, "Filter chung: Khoang trong toi thieu toi can doi dien theo R", minval=0.0, step=0.10)
+
+useEntryDistanceFilter = input.bool(true, "Filter chung: Khong vao neu Entry qua xa S/R")
+maxEntryDistanceATR = input.float(1.90, "Filter chung: Khoang cach Entry toi S/R toi da theo ATR", minval=0.0, step=0.10)
+
+useADXFilter = input.bool(true, "Filter: Yeu cau ADX toi thieu")
+adxLength = input.int(14, "ADX Length", minval=1)
+adxSmoothing = input.int(14, "ADX Smoothing", minval=1)
+minADX = input.float(25.0, "ADX toi thieu", minval=0.0, step=0.5)
+
+// ----------------------------------------------------------------------------
+// 1.12 REVERSAL ROOM + ANTI CHASE FILTERS
+// ----------------------------------------------------------------------------
+// Reversal Room Filter:
+// - Chặn SELL nến đảo chiều khi không còn đủ room xuống support.
+// - Chặn BUY nến đảo chiều khi không còn đủ room lên resistance.
+//
+// Anti Chase Filter:
+// - Không BUY khi giá đang quá gần đỉnh recent range.
+// - Không SELL khi giá đang quá gần đáy recent range.
+// Giúp hạn chế bán đáy / mua đỉnh trong vùng ngắn hạn.
+
+useReversalRoomFilter = input.bool(true, "Reversal: Yeu cau room toi can doi dien")
+reversalMinRoomR = input.float(1.0, "Reversal: Room toi thieu theo R", minval=0.0, step=0.1)
+
+useAntiChaseFilter = input.bool(true, "Filter: Khong duoi gia o vung cuc tri")
+antiChaseLookback = input.int(24, "Anti Chase: So nen xet vung gan nhat", minval=5, maxval=100)
+antiChaseExtremePct = input.float(0.25, "Anti Chase: Vung cam gan dinh/day", minval=0.05, maxval=0.50, step=0.05)
+
+// ----------------------------------------------------------------------------
+// 1.13 VISUAL SETTINGS
+// ----------------------------------------------------------------------------
+
+showSR = input.bool(true, "Hien thi Support / Resistance")
+showContinuationEMA = input.bool(true, "Hien thi EMA Continuation")
+showLabels = input.bool(true, "Hien thi label tin hieu")
+labelDisplayMode = input.string("Gon B/S", "Kieu hien thi label", options=["Full", "Gon B/S"])
+
+showLines = input.bool(true, "Hien thi line Entry / SL / TP")
+showLevelText = input.bool(true, "Hien thi text nho o line Entry / SL / TP")
+
+showHTFTable = input.bool(true, "Hien thi bang xu huong HTF")
+showLTFDebugInTable = input.bool(true, "Hien thi dong debug LTF trong bang")
+
+hideTVExitText = input.bool(true, "An chu Exit Long / Exit Short mac dinh TradingView")
+
+lineLength = input.int(25, "Do dai line sau tin hieu", minval=1)
+maxSetupsToKeep = input.int(40, "So setup toi da giu tren chart", minval=1, maxval=80)
+
+buyLabelBgColor = input.color(color.new(color.green, 0), "Mau nen label BUY")
+sellLabelBgColor = input.color(color.new(color.purple, 0), "Mau nen label SELL")
+buyLabelTextColor = input.color(color.white, "Mau chu label BUY")
+sellLabelTextColor = input.color(color.white, "Mau chu label SELL")
+
+entryColor = input.color(color.new(color.blue, 0), "Mau Entry")
+slColor = input.color(color.new(color.orange, 0), "Mau Stop Loss")
+tpColor = input.color(color.new(color.lime, 0), "Mau Take Profit")
+
+// ----------------------------------------------------------------------------
+// 1.14 SESSION FILTER
+// Nison: "Khong nen dung TF duoi 30p. Loc gio giao dich giup loai noise Asian session"
+// ----------------------------------------------------------------------------
+useSessionFilter  = input.bool(true, "Loc gio: Chi giao dich trong phien London + New York")
+sessionStartHour  = input.int(7,  "Gio bat dau phien (UTC)", minval=0, maxval=23)
+sessionEndHour    = input.int(20, "Gio ket thuc phien (UTC)", minval=0, maxval=23)
+
+// ----------------------------------------------------------------------------
+// 1.15 AL BROOKS PRICE ACTION QUALITY FILTERS
+// Nguyen tac tu "Reading Price Charts Bar by Bar" & "Trading Price Action Trends"
+// ----------------------------------------------------------------------------
+
+useAlBrooksFilters   = input.bool(false, "Al Brooks: Bat bo loc chat luong Price Action")
+
+// Barb Wire / Tight Range: Tranh dao chieu trong vung nen chong len, range nho
+useBarbWireFilter    = input.bool(true,  "Al Brooks: Tranh dao chieu trong Barb Wire (3+ nen chong len)")
+barbWireLookback     = input.int(2,      "Barb Wire: So nen kiem tra", minval=2, maxval=6)
+barbWireATRMax       = input.float(0.8,  "Barb Wire: Range tong toi da theo ATR de xac nhan tight range", minval=0.2, step=0.1)
+
+// Climax / Exhaustion: Tranh vao lenh ngay sau nen bat thuong lon
+useClimaxFilter      = input.bool(true,  "Al Brooks: Tranh vao lenh ngay sau nen Climax/Exhaustion")
+climaxATRMultiple    = input.float(2.6,  "Climax: Range nen >= X * ATR la climax", minval=1.0, step=0.1)
+
+// Reversal Bar Close Extreme: Bull reversal phai dong o top, Bear o bottom
+useCloseExtremeFilter = input.bool(true, "Al Brooks: Nen dao chieu phai dong cua sat cuc tri (top/bottom 33%)")
+closeExtremePct      = input.float(0.33, "Close extreme: Top/bottom X% cua range", minval=0.10, maxval=0.50, step=0.05)
+
+// Overlap Filter: Nen dao chieu chong len > 50% voi bar truoc la tin hieu yeu
+useOverlapFilter     = input.bool(true,  "Al Brooks: Nen dao chieu khong chong len qua nhieu voi bar truoc")
+maxOverlapPct        = input.float(0.50, "Overlap max: % overlap toi da voi bar truoc", minval=0.20, maxval=0.90, step=0.05)
+
+// ----------------------------------------------------------------------------
+// 1.16 SMC INTEGRATION — Smart Money Concepts + Order Blocks
+// Tich hop SMC (BOS/CHoCH) + Order Blocks tu chien luoc LuxAlgo SMC
+// ----------------------------------------------------------------------------
+
+useSMCTrendFilter  = input.bool(false,  "SMC: Dung cau truc swing (BOS/CHoCH) thay HTF EMA")
+useSMCOrderBlock   = input.bool(false,  "SMC: Cho vao lenh tai vung Order Block (them chon lua voi S/R)")
+obBufferATR        = input.float(0.4,   "SMC OB: Buffer vung Order Block theo ATR", minval=0.0, step=0.05)
+
+useAntiCrash       = input.bool(false,  "SMC: Khong BUY khi 3 nen lien tiep giam, khong SELL khi 3 nen lien tiep tang")
+
+useSMCQuality      = input.bool(false,  "SMC Quality: Loc choppy + bad location")
+smcChopLookback    = input.int(30,      "SMC Chop: So nen kiem tra range", minval=10, maxval=100)
+smcChopMinATR      = input.float(2.0,   "SMC Chop: Range toi thieu theo ATR (< = choppy)", minval=0.5, step=0.1)
+smcLocLookback     = input.int(60,      "SMC Location: So nen xet vung gia", minval=20, maxval=200)
+smcBuyZonePct      = input.float(0.50,  "SMC Location: BUY chi trong bottom X% cua range", minval=0.20, maxval=0.70, step=0.05)
+smcSellZonePct     = input.float(0.50,  "SMC Location: SELL chi trong top X% cua range", minval=0.30, maxval=0.80, step=0.05)
+
+useBrooksBarQuality = input.bool(false, "Al Brooks: Entry bar phai la signal bar manh (than >= 40%, close cuc tri)")
+brooksBodyMinPct    = input.float(0.40, "Brooks Bar: Than nen toi thieu so voi range", minval=0.10, maxval=0.70, step=0.05)
+
+// ============================================================================
+// 2. HELPER FUNCTIONS
+// ============================================================================
+
+fmt(_price) =>
+    str.tostring(_price, format.mintick)
+
+fmtNum(_value) =>
+    str.tostring(_value, "#.##")
+
+fmtPct(_value) =>
+    na(_value) ? "na" : str.tostring(_value, "#.##") + "%"
+
+boolText(_value) =>
+    _value ? "OK" : "BLOCK"
+
+statusBg(_value) =>
+    _value ? color.new(color.green, 75) : color.new(color.red, 75)
+
+trendBg(_bull, _bear) =>
+    _bull ? color.new(color.green, 75) : _bear ? color.new(color.red, 75) : color.new(color.gray, 80)
+
+trendText(_bull, _bear) =>
+    _bull ? "Bullish" : _bear ? "Bearish" : "Neutral"
+
+patternNameFromCode(_code) =>
+    _code == 1 ? "Bullish Engulfing" :
+     _code == 2 ? "Hammer / Bullish Pin Bar" :
+     _code == 3 ? "Three Bar Bullish Reversal" :
+     _code == 4 ? "Morning Star" :
+     _code == 5 ? "Bullish Rejection Cluster" :
+     _code == 6 ? "Continuation Breakout BUY" :
+     _code == 7 ? "Continuation Early Rejection BUY" :
+     _code == 8 ? "Micro Compression Breakout BUY" :
+     _code == -1 ? "Bearish Engulfing" :
+     _code == -2 ? "Shooting Star / Bearish Pin Bar" :
+     _code == -3 ? "Three Bar Bearish Reversal" :
+     _code == -4 ? "Evening Star" :
+     _code == -5 ? "Bearish Rejection Cluster" :
+     _code == -6 ? "Continuation Breakout SELL" :
+     _code == -7 ? "Continuation Early Rejection SELL" :
+     _code == -8 ? "Micro Compression Breakout SELL" :
+     "Unknown Pattern"
+
+getSignalLabelText(_isBuy, _entry, _sl, _tp1, _tp2) =>
+    _compactText = _isBuy ? "B" : "S"
+    _fullText = (_isBuy ? "BUY" : "SELL") + "\n" + "Entry: " + fmt(_entry) + "\n" + "SL: " + fmt(_sl) + "\n" + "TP1: " + fmt(_tp1) + "\n" + "TP2: " + fmt(_tp2)
+    labelDisplayMode == "Gon B/S" ? _compactText : _fullText
+
+getSignalLabelSize() =>
+    labelDisplayMode == "Gon B/S" ? size.normal : size.small
+
+var label[] keptLabels = array.new_label()
+var line[] keptLines = array.new_line()
+
+rememberLabel(_labelId) =>
+    array.push(keptLabels, _labelId)
+    while array.size(keptLabels) > maxSetupsToKeep * 6
+        label.delete(array.shift(keptLabels))
+
+rememberLine(_lineId) =>
+    array.push(keptLines, _lineId)
+    while array.size(keptLines) > maxSetupsToKeep * 4
+        line.delete(array.shift(keptLines))
+
+drawTradeLevel(_price, _name, _col, _style) =>
+    _lineId = line.new(bar_index, _price, bar_index + lineLength, _price, color=_col, style=_style, width=1)
+    rememberLine(_lineId)
+
+    if showLevelText
+        _labelId = label.new(bar_index + lineLength, _price, _name + " " + fmt(_price), style=label.style_label_left, color=_col, textcolor=color.white, size=size.tiny)
+        rememberLabel(_labelId)
+
+getHTFTrend(_tf) =>
+    _htfClose = request.security(syminfo.tickerid, _tf, close[1], lookahead=barmerge.lookahead_on)
+    _emaFast = request.security(syminfo.tickerid, _tf, ta.ema(close, emaFastLen)[1], lookahead=barmerge.lookahead_on)
+    _emaSlow = request.security(syminfo.tickerid, _tf, ta.ema(close, emaSlowLen)[1], lookahead=barmerge.lookahead_on)
+
+    _bull = _emaFast > _emaSlow and (not requireHTFCloseSide or _htfClose > _emaFast)
+    _bear = _emaFast < _emaSlow and (not requireHTFCloseSide or _htfClose < _emaFast)
+
+    [_bull, _bear, _htfClose, _emaFast, _emaSlow]
+
+// ============================================================================
+// 3. HTF TREND LOGIC
+// ============================================================================
+
+[bull1, bear1, htfClose1, emaFast1, emaSlow1] = getHTFTrend(tf1)
+[bull2, bear2, htfClose2, emaFast2, emaSlow2] = getHTFTrend(tf2)
+
+tf1TrendText = trendText(bull1, bear1)
+tf2TrendText = trendText(bull2, bear2)
+
+trendBull = switch htfFilterMode
+    "Ca 2 HTF dong thuan" => bull1 and bull2
+    "It nhat 1 HTF dong thuan" => bull1 or bull2
+    "Chi HTF1" => bull1
+    "Chi HTF2" => bull2
+    "Khong loc HTF" => true
+
+trendBear = switch htfFilterMode
+    "Ca 2 HTF dong thuan" => bear1 and bear2
+    "It nhat 1 HTF dong thuan" => bear1 or bear2
+    "Chi HTF1" => bear1
+    "Chi HTF2" => bear2
+    "Khong loc HTF" => true
+
+buyTrendOK = tradeMode == "Theo xu huong HTF" ? trendBull : trendBear
+sellTrendOK = tradeMode == "Theo xu huong HTF" ? trendBear : trendBull
+
+// ============================================================================
+// 4. SUPPORT / RESISTANCE LOGIC
+// ============================================================================
+
+atr = ta.atr(atrLen)
+zoneSize = atr * zoneATR
+
+pivotHigh = ta.pivothigh(high, pivotLeftBars, pivotRightBars)
+pivotLow = ta.pivotlow(low, pivotLeftBars, pivotRightBars)
+
+var float resistance = na
+var float support = na
+
+var int resistanceBar = na
+var int supportBar = na
+
+if not na(pivotHigh)
+    resistance := pivotHigh
+    resistanceBar := bar_index - pivotRightBars
+
+if not na(pivotLow)
+    support := pivotLow
+    supportBar := bar_index - pivotRightBars
+
+supportFresh = not na(support) and not na(supportBar) and (maxSRAgeBars == 0 or bar_index - supportBar <= maxSRAgeBars)
+resistanceFresh = not na(resistance) and not na(resistanceBar) and (maxSRAgeBars == 0 or bar_index - resistanceBar <= maxSRAgeBars)
+
+// Nison: S/R duoc test nhieu lan (Three Mountain/Three River) manh hon S/R don le
+var int supportTouchCount    = 0
+var int resistanceTouchCount = 0
+if useSRMultiTest
+    supportTouchCount    := 0
+    resistanceTouchCount := 0
+    if supportFresh
+        for i = 1 to srTouchLookback
+            if low[i] <= support + zoneSize and close[i] >= support - zoneSize
+                supportTouchCount += 1
+    if resistanceFresh
+        for i = 1 to srTouchLookback
+            if high[i] >= resistance - zoneSize and close[i] <= resistance + zoneSize
+                resistanceTouchCount += 1
+
+supportMultiTestOK    = not useSRMultiTest or supportTouchCount    >= srMinTouches
+resistanceMultiTestOK = not useSRMultiTest or resistanceTouchCount >= srMinTouches
+
+touchSupport    = supportFresh    and low  <= support    + zoneSize and close >= support    - zoneSize and supportMultiTestOK
+touchResistance = resistanceFresh and high >= resistance - zoneSize and close <= resistance + zoneSize and resistanceMultiTestOK
+
+plot(showSR and supportFresh ? support : na, title="Support", color=color.new(color.green, 0), style=plot.style_linebr)
+plot(showSR and resistanceFresh ? resistance : na, title="Resistance", color=color.new(color.red, 0), style=plot.style_linebr)
+
+// ============================================================================
+// 5. AUTO FIBONACCI LOGIC
+// ============================================================================
+
+var float fibSwingHigh = na
+var float fibSwingLow = na
+var int fibSwingHighBar = na
+var int fibSwingLowBar = na
+
+if not na(pivotHigh)
+    fibSwingHigh := pivotHigh
+    fibSwingHighBar := bar_index - pivotRightBars
+
+if not na(pivotLow)
+    fibSwingLow := pivotLow
+    fibSwingLowBar := bar_index - pivotRightBars
+
+fibRatioLow = math.min(fibRatioFrom, fibRatioTo)
+fibRatioHigh = math.max(fibRatioFrom, fibRatioTo)
+
+buyFibSwingValid = not na(fibSwingLow) and not na(fibSwingHigh) and not na(fibSwingLowBar) and not na(fibSwingHighBar) and fibSwingLowBar < fibSwingHighBar and fibSwingHigh > fibSwingLow and (maxFibSwingAgeBars == 0 or bar_index - fibSwingHighBar <= maxFibSwingAgeBars)
+sellFibSwingValid = not na(fibSwingLow) and not na(fibSwingHigh) and not na(fibSwingLowBar) and not na(fibSwingHighBar) and fibSwingHighBar < fibSwingLowBar and fibSwingHigh > fibSwingLow and (maxFibSwingAgeBars == 0 or bar_index - fibSwingLowBar <= maxFibSwingAgeBars)
+
+fibRange = fibSwingHigh - fibSwingLow
+
+buyFibZoneHigh = buyFibSwingValid ? fibSwingHigh - fibRange * fibRatioLow : na
+buyFibZoneLow = buyFibSwingValid ? fibSwingHigh - fibRange * fibRatioHigh : na
+
+sellFibZoneLow = sellFibSwingValid ? fibSwingLow + fibRange * fibRatioLow : na
+sellFibZoneHigh = sellFibSwingValid ? fibSwingLow + fibRange * fibRatioHigh : na
+
+fibBuyOKRaw = buyFibSwingValid and high >= buyFibZoneLow and low <= buyFibZoneHigh
+fibSellOKRaw = sellFibSwingValid and high >= sellFibZoneLow and low <= sellFibZoneHigh
+
+buyFibLowPlot = plot(showFibZones and buyFibSwingValid ? buyFibZoneLow : na, title="BUY Fib Zone Low", color=color.new(color.teal, 20), style=plot.style_linebr)
+buyFibHighPlot = plot(showFibZones and buyFibSwingValid ? buyFibZoneHigh : na, title="BUY Fib Zone High", color=color.new(color.teal, 20), style=plot.style_linebr)
+sellFibLowPlot = plot(showFibZones and sellFibSwingValid ? sellFibZoneLow : na, title="SELL Fib Zone Low", color=color.new(color.fuchsia, 20), style=plot.style_linebr)
+sellFibHighPlot = plot(showFibZones and sellFibSwingValid ? sellFibZoneHigh : na, title="SELL Fib Zone High", color=color.new(color.fuchsia, 20), style=plot.style_linebr)
+
+fill(buyFibLowPlot, buyFibHighPlot, color=color.new(color.teal, 90), title="BUY Fib Zone Fill")
+fill(sellFibLowPlot, sellFibHighPlot, color=color.new(color.fuchsia, 90), title="SELL Fib Zone Fill")
+
+// ============================================================================
+// 6. RSI / MACD / ADX LOGIC
+// ============================================================================
+
+rsi = ta.rsi(close, rsiLen)
+
+rsiEntryBuyOK = switch rsiEntryGateMode
+    "Khong loc RSI entry" => true
+    "Chan qua mua/qua ban" => rsi <= rsiOverbought
+    "Chi giao dich qua mua/qua ban" => rsi <= rsiOversold
+
+rsiEntrySellOK = switch rsiEntryGateMode
+    "Khong loc RSI entry" => true
+    "Chan qua mua/qua ban" => rsi >= rsiOversold
+    "Chi giao dich qua mua/qua ban" => rsi >= rsiOverbought
+
+rsiBuyPullback = rsi >= rsiBuyMin and rsi <= rsiBuyMax and rsi > rsi[1]
+rsiSellPullback = rsi >= rsiSellMin and rsi <= rsiSellMax and rsi < rsi[1]
+
+rsiBuyCross = ta.crossover(rsi, rsiMid)
+rsiSellCross = ta.crossunder(rsi, rsiMid)
+
+rsiBuyOKRaw = switch rsiMode
+    "Pullback + slope" => rsiBuyPullback
+    "Cross 50" => rsiBuyCross
+    "Either" => rsiBuyPullback or rsiBuyCross
+
+rsiSellOKRaw = switch rsiMode
+    "Pullback + slope" => rsiSellPullback
+    "Cross 50" => rsiSellCross
+    "Either" => rsiSellPullback or rsiSellCross
+
+[macdLine, macdSignal, macdHist] = ta.macd(close, macdFastLen, macdSlowLen, macdSignalLen)
+
+macdBuyHist = macdHist > macdHist[1]
+macdSellHist = macdHist < macdHist[1]
+
+macdBuyHistPeakTurn = macdHist[1] < macdHist[2] and macdHist[1] < macdHist and macdHist[1] < 0
+macdSellHistPeakTurn = macdHist[1] > macdHist[2] and macdHist[1] > macdHist and macdHist[1] > 0
+
+macdBuyCross = ta.crossover(macdLine, macdSignal)
+macdSellCross = ta.crossunder(macdLine, macdSignal)
+
+macdHistEntryBuyOK = switch macdHistEntryGateMode
+    "Khong loc MACD Histogram entry" => true
+    "Chi BUY day Hist / SELL dinh Hist" => macdBuyHistPeakTurn
+
+macdHistEntrySellOK = switch macdHistEntryGateMode
+    "Khong loc MACD Histogram entry" => true
+    "Chi BUY day Hist / SELL dinh Hist" => macdSellHistPeakTurn
+
+macdBuyOKRaw = switch macdMode
+    "Histogram direction" => macdBuyHist
+    "Histogram peak turn" => macdBuyHistPeakTurn
+    "MACD cross" => macdBuyCross
+    "Either" => macdBuyHist or macdBuyCross or macdBuyHistPeakTurn
+
+macdSellOKRaw = switch macdMode
+    "Histogram direction" => macdSellHist
+    "Histogram peak turn" => macdSellHistPeakTurn
+    "MACD cross" => macdSellCross
+    "Either" => macdSellHist or macdSellCross or macdSellHistPeakTurn
+
+[plusDI, minusDI, adxValue] = ta.dmi(adxLength, adxSmoothing)
+adxFilterOK = not useADXFilter or adxValue >= minADX
+
+// ============================================================================
+// 7. LTF EMA CONTEXT
+// ============================================================================
+
+contEmaFast = ta.ema(close, contFastEmaLen)
+contEmaSlow = ta.ema(close, contSlowEmaLen)
+
+contTrendBull = close > contEmaFast and contEmaFast > contEmaSlow
+contTrendBear = close < contEmaFast and contEmaFast < contEmaSlow
+
+contEmaSlopeBull = not contRequireEmaSlope or contEmaFast > contEmaFast[contEmaSlopeBars]
+contEmaSlopeBear = not contRequireEmaSlope or contEmaFast < contEmaFast[contEmaSlopeBars]
+
+plot(showContinuationEMA ? contEmaFast : na, title="Continuation EMA Fast", color=color.new(color.yellow, 0))
+plot(showContinuationEMA ? contEmaSlow : na, title="Continuation EMA Slow", color=color.new(color.orange, 0))
+
+// ============================================================================
+// 7.5. AL BROOKS PRICE ACTION QUALITY FILTERS
+// Nguon: "Reading Price Charts Bar by Bar" & "Trading Price Action Trends" - Al Brooks
+// ============================================================================
+
+// --- Barb Wire / Tight Range Detection ---
+// 3+ nen chong len voi range tong nho → thi truong dang choppy, tranh dao chieu
+albHighN     = ta.highest(high, barbWireLookback)
+albLowN      = ta.lowest(low,  barbWireLookback)
+albRangeN    = albHighN - albLowN
+albTightOK   = not useAlBrooksFilters or not useBarbWireFilter or albRangeN > atr * barbWireATRMax
+
+// --- Climax / Exhaustion Bar Detection ---
+// Neu mot trong 2 nen vua qua co range bat thuong lon → skip entry (thi truong kiet suc)
+albPrevRange1   = high[1] - low[1]
+albPrevRange2   = high[2] - low[2]
+albClimaxHit    = math.max(albPrevRange1, albPrevRange2) >= atr * climaxATRMultiple
+albClimaxOK     = not useAlBrooksFilters or not useClimaxFilter or not albClimaxHit
+
+// --- Reversal Bar Close Extreme Quality ---
+// Bull reversal: close phai o top closeExtremePct% cua range (dong gan high = bulls kiem soat)
+// Bear reversal: close phai o bottom closeExtremePct% cua range (dong gan low = bears kiem soat)
+albBarRng        = high - low
+albBullCloseOK   = not useAlBrooksFilters or not useCloseExtremeFilter or albBarRng <= 0 or (close - low) / albBarRng >= (1.0 - closeExtremePct)
+albBearCloseOK   = not useAlBrooksFilters or not useCloseExtremeFilter or albBarRng <= 0 or (high - close) / albBarRng >= (1.0 - closeExtremePct)
+
+// --- Overlap Filter ---
+// Neu nen hien tai chong len > maxOverlapPct% voi bar truoc → tin hieu yeu (hai phia thi truong)
+albPrevRng       = high[1] - low[1]
+albOverlapHigh   = math.min(high, high[1])
+albOverlapLow    = math.max(low, low[1])
+albOverlapSpan   = math.max(0.0, albOverlapHigh - albOverlapLow)
+albOverlapRatio  = albPrevRng > 0 ? albOverlapSpan / albPrevRng : 0.0
+albBullOverlapOK = not useAlBrooksFilters or not useOverlapFilter or albOverlapRatio < maxOverlapPct
+albBearOverlapOK = not useAlBrooksFilters or not useOverlapFilter or albOverlapRatio < maxOverlapPct
+
+// --- Composite Al Brooks Checks ---
+// Single candle reversal: can ca 4 bo loc
+albSingleBullOK = albTightOK and albClimaxOK and albBullCloseOK and albBullOverlapOK
+albSingleBearOK = albTightOK and albClimaxOK and albBearCloseOK and albBearOverlapOK
+// Multi candle reversal: tight range + climax (close extreme it quan trong hon voi mau nhieu nen)
+albMultiBullOK  = albTightOK and albClimaxOK
+albMultiBearOK  = albTightOK and albClimaxOK
+// Continuation & Micro: chi climax filter (2 pattern nay can tight range nen khong dung tight filter)
+albContMicroOK  = albClimaxOK
+
+// ============================================================================
+// 7.6. SMC TREND DETECTION — dung LTF EMA20/50 (reliable, da tinh san o Section 7)
+// contTrendBull = close > EMA20 > EMA50 → xu huong tang ro rang tren TF hien tai
+// contTrendBear = close < EMA20 < EMA50 → xu huong giam ro rang tren TF hien tai
+// Ly do khong dung BOS/CHoCH: delayed pivot + crossover logic gay smcBias = 0 (block tat ca)
+// ============================================================================
+
+smcTrendBull = contTrendBull   // close > EMA20 > EMA50
+smcTrendBear = contTrendBear   // close < EMA20 < EMA50
+
+smcTrendBuyOK  = not useSMCTrendFilter or smcTrendBull
+smcTrendSellOK = not useSMCTrendFilter or smcTrendBear
+
+// ============================================================================
+// 7.7. ORDER BLOCK — dua tren EMA cross (don gian, khong bi loi delayed pivot)
+// Bullish OB: EMA20 vua cat len tren EMA50 → vung ho tro (nen giam truoc cross)
+// Bearish OB: EMA20 vua cat xuong duoi EMA50 → vung khang cu (nen tang truoc cross)
+// ============================================================================
+
+emaCrossBull = ta.crossover(contEmaFast, contEmaSlow)   // EMA20 cat len EMA50
+emaCrossBear = ta.crossunder(contEmaFast, contEmaSlow)  // EMA20 cat xuong EMA50
+
+var float smcBullOBHigh = na
+var float smcBullOBLow  = na
+var float smcBearOBHigh = na
+var float smcBearOBLow  = na
+
+// Luu nen giam cuoi cung truoc bull EMA cross → Bullish OB
+if emaCrossBull
+    for _i = 1 to 8
+        if close[_i] < open[_i]
+            smcBullOBHigh := high[_i]
+            smcBullOBLow  := low[_i]
+            break
+
+// Luu nen tang cuoi cung truoc bear EMA cross → Bearish OB
+if emaCrossBear
+    for _i = 1 to 8
+        if close[_i] > open[_i]
+            smcBearOBHigh := high[_i]
+            smcBearOBLow  := low[_i]
+            break
+
+obBufSize   = atr * obBufferATR
+inBullOBnow = useSMCOrderBlock and not na(smcBullOBHigh) and smcTrendBull and low <= smcBullOBHigh + obBufSize and high >= smcBullOBLow - obBufSize
+inBearOBnow = useSMCOrderBlock and not na(smcBearOBHigh) and smcTrendBear and high >= smcBearOBLow - obBufSize and low <= smcBearOBHigh + obBufSize
+
+// ============================================================================
+// 7.8. ANTI-CRASH + CHOP + LOCATION + BROOKS BAR QUALITY
+// ============================================================================
+
+// Anti-crash (Al Brooks: "Never buy a 3-bar bear crash pullback")
+bearCrash3now = close[1] < open[1] and close[2] < open[2] and close[3] < open[3]
+bullCrash3now = close[1] > open[1] and close[2] > open[2] and close[3] > open[3]
+antiCrashBuyOK  = not useAntiCrash or not bearCrash3now
+antiCrashSellOK = not useAntiCrash or not bullCrash3now
+
+// Chop detection: range gan day qua nho so voi ATR → thi truong dang di ngang
+smcChopHigh = ta.highest(high, smcChopLookback)
+smcChopLow  = ta.lowest(low,  smcChopLookback)
+smcChopRng  = smcChopHigh - smcChopLow
+smcIsChop   = smcChopRng < atr * smcChopMinATR
+smcChopOK   = not useSMCQuality or not smcIsChop
+
+// Location: BUY o vung discount (duoi), SELL o vung premium (tren) — chi cho reversal
+smcLocHigh  = ta.highest(high, smcLocLookback)
+smcLocLow   = ta.lowest(low,  smcLocLookback)
+smcLocRng   = math.max(smcLocHigh - smcLocLow, syminfo.mintick)
+smcLocPos   = (close - smcLocLow) / smcLocRng
+smcBuyLocOK  = not useSMCQuality or smcLocPos <= smcBuyZonePct
+smcSellLocOK = not useSMCQuality or smcLocPos >= (1.0 - smcSellZonePct)
+
+// Brooks signal bar quality (ap dung cho entry bar):
+// Bull: close > open, than >= 40%, bong duoi > bong tren, close >= midpoint
+// Bear: close < open, than >= 40%, bong tren > bong duoi, close <= midpoint
+_bRng  = high - low
+_bBody = math.abs(close - open)
+_bLW   = math.min(open, close) - low
+_bUW   = high - math.max(open, close)
+// Phien ban mem hon: chi yeu cau than nen du lon + close o nua tren/duoi + dung chieu
+// Bo dieu kien bong nen (lw >= uw) vi qua chat voi nen breakout co bong ngan tren
+brooksBullBarOK = not useBrooksBarQuality or (_bRng > 0 and (_bBody / _bRng) >= brooksBodyMinPct and close >= (high + low) / 2 and close > open)
+brooksBearBarOK = not useBrooksBarQuality or (_bRng > 0 and (_bBody / _bRng) >= brooksBodyMinPct and close <= (high + low) / 2 and close < open)
+
+// ============================================================================
+// 8. REVERSAL PATTERN LOGIC
+// ============================================================================
+
+body = math.abs(close - open)
+bodySafe = math.max(body, syminfo.mintick)
+candleRange = high - low
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+
+smallBody = candleRange > 0 and bodySafe <= candleRange * maxBodyPct
+
+bullishEngulfing = close > open and close[1] < open[1] and open <= close[1] and close >= open[1]
+bearishEngulfing = close < open and close[1] > open[1] and open >= close[1] and close <= open[1]
+
+// Nison: "Than Hammer phai o PHAN TREN cua range (body o tren, bong duoi dai gap 2x than)"
+// Nison: "Than ShootingStar/HangingMan phai o PHAN DUOI cua range"
+hammerBodyInUpper      = candleRange <= 0 or (math.min(open, close) - low) / candleRange >= hammerBodyPosPct
+shootingStarBodyInLower = candleRange <= 0 or (high - math.max(open, close)) / candleRange >= hammerBodyPosPct
+
+hammer       = candleRange > 0 and smallBody and lowerWick >= bodySafe * wickRatio and upperWick <= candleRange * maxOppWickPct and hammerBodyInUpper
+shootingStar = candleRange > 0 and smallBody and upperWick >= bodySafe * wickRatio and lowerWick <= candleRange * maxOppWickPct and shootingStarBodyInLower
+
+singleBullPattern = bullishEngulfing or hammer
+singleBearPattern = bearishEngulfing or shootingStar
+
+singleBullCode = bullishEngulfing ? 1 : hammer ? 2 : 0
+singleBearCode = bearishEngulfing ? -1 : shootingStar ? -2 : 0
+
+// SMC: Cho phep vao lenh tai S/R pivot HOAC tai vung Order Block (mo rong co hoi entry chat luong)
+// Khong ap dung location filter — mau thuau voi trend filter (bull trend -> gia o nua tren range)
+singleBullSetup = useSingleCandlePattern and singleBullPattern and (touchSupport or inBullOBnow) and albSingleBullOK
+singleBearSetup = useSingleCandlePattern and singleBearPattern and (touchResistance or inBearOBnow) and albSingleBearOK
+
+threeBarBullBasic = low[1] < low[2] and low[1] < low and close > open and close > close[1]
+threeBarBearBasic = high[1] > high[2] and high[1] > high and close < open and close < close[1]
+
+threeBarBullPattern = threeBarRequireBreakHighLow ? threeBarBullBasic and close > high[1] : threeBarBullBasic
+threeBarBearPattern = threeBarRequireBreakHighLow ? threeBarBearBasic and close < low[1] : threeBarBearBasic
+
+touchSupport3 = supportFresh and ta.lowest(low, 3) <= support + zoneSize and close >= support - zoneSize
+touchResistance3 = resistanceFresh and ta.highest(high, 3) >= resistance - zoneSize and close <= resistance + zoneSize
+
+threeBarBullSignalNow = useThreeBarPattern and threeBarBullPattern and touchSupport3
+threeBarBearSignalNow = useThreeBarPattern and threeBarBearPattern and touchResistance3
+
+firstBearStrong = close[2] < open[2] and math.abs(close[2] - open[2]) >= atr * starFirstBodyATR
+firstBullStrong = close[2] > open[2] and math.abs(close[2] - open[2]) >= atr * starFirstBodyATR
+
+middleRange = high[1] - low[1]
+middleBody = math.abs(close[1] - open[1])
+middleSmallBody = middleRange > 0 and middleBody <= middleRange * starMiddleMaxBodyPct
+
+firstBearMidpoint = close[2] + (open[2] - close[2]) * starCloseIntoFirstBodyPct
+firstBullMidpoint = close[2] - (close[2] - open[2]) * starCloseIntoFirstBodyPct
+
+// Nison: "Gap truoc/sau ngoi sao tang do tin cay. Morning Star: sao gap xuong tu nen 1"
+morningStarGapOK = not starRequireGap or open[1] <= close[2]
+eveningStarGapOK = not starRequireGap or open[1] >= close[2]
+
+morningStarPattern = firstBearStrong and middleSmallBody and close > open and close >= firstBearMidpoint and morningStarGapOK
+eveningStarPattern = firstBullStrong and middleSmallBody and close < open and close <= firstBullMidpoint and eveningStarGapOK
+
+morningStarSignalNow = useMorningEveningPattern and morningStarPattern and touchSupport3
+eveningStarSignalNow = useMorningEveningPattern and eveningStarPattern and touchResistance3
+
+range0 = high - low
+range1 = high[1] - low[1]
+range2 = high[2] - low[2]
+range3 = high[3] - low[3]
+range4 = high[4] - low[4]
+
+lowerWick0 = math.min(open, close) - low
+lowerWick1 = math.min(open[1], close[1]) - low[1]
+lowerWick2 = math.min(open[2], close[2]) - low[2]
+lowerWick3 = math.min(open[3], close[3]) - low[3]
+lowerWick4 = math.min(open[4], close[4]) - low[4]
+
+upperWick0 = high - math.max(open, close)
+upperWick1 = high[1] - math.max(open[1], close[1])
+upperWick2 = high[2] - math.max(open[2], close[2])
+upperWick3 = high[3] - math.max(open[3], close[3])
+upperWick4 = high[4] - math.max(open[4], close[4])
+
+lowerReject0 = range0 > 0 and lowerWick0 / range0 >= clusterWickPct ? 1 : 0
+lowerReject1 = range1 > 0 and lowerWick1 / range1 >= clusterWickPct ? 1 : 0
+lowerReject2 = range2 > 0 and lowerWick2 / range2 >= clusterWickPct ? 1 : 0
+lowerReject3 = range3 > 0 and lowerWick3 / range3 >= clusterWickPct ? 1 : 0
+lowerReject4 = range4 > 0 and lowerWick4 / range4 >= clusterWickPct ? 1 : 0
+
+upperReject0 = range0 > 0 and upperWick0 / range0 >= clusterWickPct ? 1 : 0
+upperReject1 = range1 > 0 and upperWick1 / range1 >= clusterWickPct ? 1 : 0
+upperReject2 = range2 > 0 and upperWick2 / range2 >= clusterWickPct ? 1 : 0
+upperReject3 = range3 > 0 and upperWick3 / range3 >= clusterWickPct ? 1 : 0
+upperReject4 = range4 > 0 and upperWick4 / range4 >= clusterWickPct ? 1 : 0
+
+lowerRejectCount3 = lowerReject0 + lowerReject1 + lowerReject2
+lowerRejectCount4 = lowerReject0 + lowerReject1 + lowerReject2 + lowerReject3
+lowerRejectCount5 = lowerReject0 + lowerReject1 + lowerReject2 + lowerReject3 + lowerReject4
+
+upperRejectCount3 = upperReject0 + upperReject1 + upperReject2
+upperRejectCount4 = upperReject0 + upperReject1 + upperReject2 + upperReject3
+upperRejectCount5 = upperReject0 + upperReject1 + upperReject2 + upperReject3 + upperReject4
+
+lowerRejectCount = clusterLookbackBars == 3 ? lowerRejectCount3 : clusterLookbackBars == 4 ? lowerRejectCount4 : lowerRejectCount5
+upperRejectCount = clusterLookbackBars == 3 ? upperRejectCount3 : clusterLookbackBars == 4 ? upperRejectCount4 : upperRejectCount5
+
+clusterBullPattern = lowerRejectCount >= clusterMinRejectBars and close > open and close > close[1]
+clusterBearPattern = upperRejectCount >= clusterMinRejectBars and close < open and close < close[1]
+
+touchSupportCluster = supportFresh and ta.lowest(low, clusterLookbackBars) <= support + zoneSize and close >= support - zoneSize
+touchResistanceCluster = resistanceFresh and ta.highest(high, clusterLookbackBars) >= resistance - zoneSize and close <= resistance + zoneSize
+
+clusterBullSignalNow = useRejectionClusterPattern and clusterBullPattern and touchSupportCluster
+clusterBearSignalNow = useRejectionClusterPattern and clusterBearPattern and touchResistanceCluster
+
+// ============================================================================
+// 9. CONTINUATION PULLBACK LOGIC
+// ============================================================================
+
+contClusterHigh = ta.highest(high[1], contPullbackBars)
+contClusterLow = ta.lowest(low[1], contPullbackBars)
+contClusterRange = contClusterHigh - contClusterLow
+
+contClusterRangeOK = contClusterRange <= atr * contMaxClusterRangeATR
+
+impulseStartClose = close[contPullbackBars + contImpulseLookback]
+impulseEndClose = close[contPullbackBars]
+
+bullImpulseMove = impulseEndClose - impulseStartClose
+bearImpulseMove = impulseStartClose - impulseEndClose
+
+bullImpulseOK = bullImpulseMove >= atr * contMinImpulseATR
+bearImpulseOK = bearImpulseMove >= atr * contMinImpulseATR
+
+bullPullbackDepth = impulseEndClose - contClusterLow
+bearPullbackDepth = contClusterHigh - impulseEndClose
+
+bullRetraceOK = bullImpulseMove > 0 and bullPullbackDepth <= bullImpulseMove * contMaxRetrace
+bearRetraceOK = bearImpulseMove > 0 and bearPullbackDepth <= bearImpulseMove * contMaxRetrace
+
+emaRetestBuy = ta.lowest(low[1], contPullbackBars) <= contEmaFast[1] or ta.lowest(low[1], contPullbackBars) <= contEmaSlow[1]
+emaRetestSell = ta.highest(high[1], contPullbackBars) >= contEmaFast[1] or ta.highest(high[1], contPullbackBars) >= contEmaSlow[1]
+
+srRetestBuy = supportFresh and ta.lowest(low[1], contPullbackBars) <= support + zoneSize
+srRetestSell = resistanceFresh and ta.highest(high[1], contPullbackBars) >= resistance - zoneSize
+
+retestBuyOK = contRequireEmaRetest ? emaRetestBuy or (contAllowSRRetest and srRetestBuy) : true
+retestSellOK = contRequireEmaRetest ? emaRetestSell or (contAllowSRRetest and srRetestSell) : true
+
+contConfirmRange = high - low
+contConfirmBody = math.abs(close - open)
+contConfirmBodyOK = contConfirmRange > 0 and contConfirmBody / contConfirmRange >= contConfirmBodyPct
+
+contLowerWickNow = math.min(open, close) - low
+contUpperWickNow = high - math.max(open, close)
+
+contLowerRejectOK = contConfirmRange > 0 and contLowerWickNow / contConfirmRange >= contEarlyRejectionWickPct
+contUpperRejectOK = contConfirmRange > 0 and contUpperWickNow / contConfirmRange >= contEarlyRejectionWickPct
+
+contBuyBreakoutDistanceOK = close - contClusterHigh <= atr * contMaxBreakoutDistanceATR
+contSellBreakoutDistanceOK = contClusterLow - close <= atr * contMaxBreakoutDistanceATR
+
+contBuyBreakout = close > open and close > contClusterHigh and contConfirmBodyOK and contBuyBreakoutDistanceOK
+contSellBreakout = close < open and close < contClusterLow and contConfirmBodyOK and contSellBreakoutDistanceOK
+
+earlyBuyCloseOK = not contEarlyCloseBeyondPrev or close > math.max(open[1], close[1])
+earlySellCloseOK = not contEarlyCloseBeyondPrev or close < math.min(open[1], close[1])
+
+contEarlyBuy = close > open and contLowerRejectOK and earlyBuyCloseOK and retestBuyOK
+contEarlySell = close < open and contUpperRejectOK and earlySellCloseOK and retestSellOK
+
+contUseBreakout = contEntryMode == "Breakout khoi cum" or contEntryMode == "Ca hai"
+contUseEarly = contEntryMode == "Early rejection tai EMA/SR" or contEntryMode == "Ca hai"
+
+continuationBuyBreakoutSignal = contUseBreakout and contBuyBreakout
+continuationSellBreakoutSignal = contUseBreakout and contSellBreakout
+
+continuationBuyEarlySignal = contUseEarly and contEarlyBuy
+continuationSellEarlySignal = contUseEarly and contEarlySell
+
+continuationBuyRaw = continuationBuyBreakoutSignal or continuationBuyEarlySignal
+continuationSellRaw = continuationSellBreakoutSignal or continuationSellEarlySignal
+
+continuationBuySignal = useContinuationPattern and contTrendBull and contEmaSlopeBull and bullImpulseOK and bullRetraceOK and contClusterRangeOK and retestBuyOK and continuationBuyRaw
+continuationSellSignal = useContinuationPattern and contTrendBear and contEmaSlopeBear and bearImpulseOK and bearRetraceOK and contClusterRangeOK and retestSellOK and continuationSellRaw
+
+continuationBuyLowForSL = math.min(contClusterLow, low)
+continuationSellHighForSL = math.max(contClusterHigh, high)
+
+continuationSupportForDistance = srRetestBuy ? support : contEmaFast
+continuationResistanceForDistance = srRetestSell ? resistance : contEmaFast
+
+continuationBuyCode = continuationBuyBreakoutSignal ? 6 : 7
+continuationSellCode = continuationSellBreakoutSignal ? -6 : -7
+
+// ============================================================================
+// 10. MICRO COMPRESSION BREAKOUT LOGIC
+// ============================================================================
+
+microHigh = ta.highest(high[1], microBars)
+microLow = ta.lowest(low[1], microBars)
+microRange = microHigh - microLow
+
+microRangeOK = microRange <= atr * microMaxRangeATR
+
+microCandleRange = high - low
+microBody = math.abs(close - open)
+microBodyPctNow = microCandleRange > 0 ? microBody / microCandleRange : 0.0
+microBodyOK = microBodyPctNow >= microBreakoutBodyPct
+
+microBuyDistanceOK = close - microHigh <= atr * microMaxBreakoutDistanceATR
+microSellDistanceOK = microLow - close <= atr * microMaxBreakoutDistanceATR
+
+microBuyBreakoutRaw = close > open and close > microHigh and microBodyOK and microBuyDistanceOK
+microSellBreakoutRaw = close < open and close < microLow and microBodyOK and microSellDistanceOK
+
+microBuyHTFOK = not microRequireHTFDirection or buyTrendOK
+microSellHTFOK = not microRequireHTFDirection or sellTrendOK
+
+microBuyEMAOK = not microRequireEMADirection or contTrendBull
+microSellEMAOK = not microRequireEMADirection or contTrendBear
+
+microBuyAvoidSROK = not microAvoidOppositeSR or not resistanceFresh or close < resistance
+microSellAvoidSROK = not microAvoidOppositeSR or not supportFresh or close > support
+
+microBuySignal = useMicroBreakout and microRangeOK and microBuyBreakoutRaw and microBuyHTFOK and microBuyEMAOK and microBuyAvoidSROK
+microSellSignal = useMicroBreakout and microRangeOK and microSellBreakoutRaw and microSellHTFOK and microSellEMAOK and microSellAvoidSROK
+
+microBuyLowForSL = math.min(microLow, low)
+microSellHighForSL = math.max(microHigh, high)
+
+// ============================================================================
+// 11. SINGLE-CANDLE SETUP CONFIRMATION
+// ============================================================================
+
+barsSinceSingleBullSetup = ta.barssince(singleBullSetup)
+barsSinceSingleBearSetup = ta.barssince(singleBearSetup)
+
+singleBullSetupRecent = not na(barsSinceSingleBullSetup) and barsSinceSingleBullSetup >= 1 and barsSinceSingleBullSetup <= confirmWithinBars
+singleBearSetupRecent = not na(barsSinceSingleBearSetup) and barsSinceSingleBearSetup >= 1 and barsSinceSingleBearSetup <= confirmWithinBars
+
+lastSingleBullSetupBar = ta.valuewhen(singleBullSetup, bar_index, 0)
+lastSingleBearSetupBar = ta.valuewhen(singleBearSetup, bar_index, 0)
+
+lastSingleBullHigh = ta.valuewhen(singleBullSetup, high, 0)
+lastSingleBullLow = ta.valuewhen(singleBullSetup, low, 0)
+lastSingleBullBodyHigh = ta.valuewhen(singleBullSetup, math.max(open, close), 0)
+lastSingleBullSupport = ta.valuewhen(singleBullSetup, support, 0)
+lastSingleBullCode = ta.valuewhen(singleBullSetup, singleBullCode, 0)
+lastSingleBullFibOK = ta.valuewhen(singleBullSetup, fibBuyOKRaw, 0)
+
+lastSingleBearHigh = ta.valuewhen(singleBearSetup, high, 0)
+lastSingleBearLow = ta.valuewhen(singleBearSetup, low, 0)
+lastSingleBearBodyLow = ta.valuewhen(singleBearSetup, math.min(open, close), 0)
+lastSingleBearResistance = ta.valuewhen(singleBearSetup, resistance, 0)
+lastSingleBearCode = ta.valuewhen(singleBearSetup, singleBearCode, 0)
+lastSingleBearFibOK = ta.valuewhen(singleBearSetup, fibSellOKRaw, 0)
+
+singleBuyBreakLevel = confirmMode == "Close vuot High/Low" ? lastSingleBullHigh : lastSingleBullBodyHigh
+singleSellBreakLevel = confirmMode == "Close vuot High/Low" ? lastSingleBearLow : lastSingleBearBodyLow
+
+singleBuyBreakOK = singleBullSetupRecent and not na(singleBuyBreakLevel) and close > singleBuyBreakLevel
+singleSellBreakOK = singleBearSetupRecent and not na(singleSellBreakLevel) and close < singleSellBreakLevel
+
+barCloseOK = not confirmedBarOnly or barstate.isconfirmed
+
+confirmRange = high - low
+confirmBody = math.abs(close - open)
+confirmUpperWick = high - math.max(open, close)
+confirmLowerWick = math.min(open, close) - low
+
+confirmBodyPctNow = confirmRange > 0 ? confirmBody / confirmRange : 0.0
+confirmUpperWickPctNow = confirmRange > 0 ? confirmUpperWick / confirmRange : 1.0
+confirmLowerWickPctNow = confirmRange > 0 ? confirmLowerWick / confirmRange : 1.0
+
+strongBuyConfirmCandle = not useStrongConfirmCandle or (close > open and confirmBodyPctNow >= confirmMinBodyPct and confirmUpperWickPctNow <= confirmMaxUpperWickPct and confirmLowerWickPctNow <= confirmMaxLowerWickPct)
+strongSellConfirmCandle = not useStrongConfirmCandle or (close < open and confirmBodyPctNow >= confirmMinBodyPct and confirmUpperWickPctNow <= confirmMaxUpperWickPct and confirmLowerWickPctNow <= confirmMaxLowerWickPct)
+
+// ============================================================================
+// 12. MULTI-CANDLE REVERSAL LOGIC
+// ============================================================================
+
+multiBullSignalNow = threeBarBullSignalNow or morningStarSignalNow or clusterBullSignalNow
+multiBearSignalNow = threeBarBearSignalNow or eveningStarSignalNow or clusterBearSignalNow
+
+multiBullSignalCode = threeBarBullSignalNow ? 3 : morningStarSignalNow ? 4 : clusterBullSignalNow ? 5 : 0
+multiBearSignalCode = threeBarBearSignalNow ? -3 : eveningStarSignalNow ? -4 : clusterBearSignalNow ? -5 : 0
+
+multiBullLowForSL = clusterBullSignalNow ? ta.lowest(low, clusterLookbackBars) : ta.lowest(low, 3)
+multiBearHighForSL = clusterBearSignalNow ? ta.highest(high, clusterLookbackBars) : ta.highest(high, 3)
+
+multiBullSupport = support
+multiBearResistance = resistance
+
+multiBullFibOK = fibBuyOKRaw
+multiBearFibOK = fibSellOKRaw
+
+multiNeedsExtraConfirm = multiPatternEntryMode == "Can them nen xac nhan"
+
+barsSinceMultiBullSetup = ta.barssince(multiBullSignalNow)
+barsSinceMultiBearSetup = ta.barssince(multiBearSignalNow)
+
+multiBullSetupRecent = not na(barsSinceMultiBullSetup) and barsSinceMultiBullSetup >= 1 and barsSinceMultiBullSetup <= confirmWithinBars
+multiBearSetupRecent = not na(barsSinceMultiBearSetup) and barsSinceMultiBearSetup >= 1 and barsSinceMultiBearSetup <= confirmWithinBars
+
+lastMultiBullHigh = ta.valuewhen(multiBullSignalNow, high, 0)
+lastMultiBullBodyHigh = ta.valuewhen(multiBullSignalNow, math.max(open, close), 0)
+lastMultiBearLow = ta.valuewhen(multiBearSignalNow, low, 0)
+lastMultiBearBodyLow = ta.valuewhen(multiBearSignalNow, math.min(open, close), 0)
+
+multiBuyBreakLevel = confirmMode == "Close vuot High/Low" ? lastMultiBullHigh : lastMultiBullBodyHigh
+multiSellBreakLevel = confirmMode == "Close vuot High/Low" ? lastMultiBearLow : lastMultiBearBodyLow
+
+multiBuyBreakOK = multiBullSetupRecent and not na(multiBuyBreakLevel) and close > multiBuyBreakLevel
+multiSellBreakOK = multiBearSetupRecent and not na(multiSellBreakLevel) and close < multiSellBreakLevel
+
+multiBullConfirmNow = multiNeedsExtraConfirm ? multiBuyBreakOK : multiBullSignalNow
+multiBearConfirmNow = multiNeedsExtraConfirm ? multiSellBreakOK : multiBearSignalNow
+
+// ============================================================================
+// 13. CONFLUENCE SCORE
+// ============================================================================
+
+enabledFilterCount = (useRSIFilter ? 1 : 0) + (useMACDFilter ? 1 : 0) + (useFibFilter ? 1 : 0)
+confluenceMinScore = math.min(westernMinScore, enabledFilterCount)
+
+rsiBuyPoint = useRSIFilter and rsiBuyOKRaw ? 1 : 0
+rsiSellPoint = useRSIFilter and rsiSellOKRaw ? 1 : 0
+
+macdBuyPoint = useMACDFilter and macdBuyOKRaw ? 1 : 0
+macdSellPoint = useMACDFilter and macdSellOKRaw ? 1 : 0
+
+fibSingleBuyPoint = useFibFilter and lastSingleBullFibOK ? 1 : 0
+fibSingleSellPoint = useFibFilter and lastSingleBearFibOK ? 1 : 0
+
+fibMultiBuyPoint = useFibFilter and multiBullFibOK ? 1 : 0
+fibMultiSellPoint = useFibFilter and multiBearFibOK ? 1 : 0
+
+fibContBuyPoint = useFibFilter and fibBuyOKRaw ? 1 : 0
+fibContSellPoint = useFibFilter and fibSellOKRaw ? 1 : 0
+
+fibMicroBuyPoint = useFibFilter and fibBuyOKRaw ? 1 : 0
+fibMicroSellPoint = useFibFilter and fibSellOKRaw ? 1 : 0
+
+westernSingleBuyScore = rsiBuyPoint + macdBuyPoint + fibSingleBuyPoint
+westernSingleSellScore = rsiSellPoint + macdSellPoint + fibSingleSellPoint
+
+westernMultiBuyScore = rsiBuyPoint + macdBuyPoint + fibMultiBuyPoint
+westernMultiSellScore = rsiSellPoint + macdSellPoint + fibMultiSellPoint
+
+westernContBuyScore = rsiBuyPoint + macdBuyPoint + fibContBuyPoint
+westernContSellScore = rsiSellPoint + macdSellPoint + fibContSellPoint
+
+westernMicroBuyScore = rsiBuyPoint + macdBuyPoint + fibMicroBuyPoint
+westernMicroSellScore = rsiSellPoint + macdSellPoint + fibMicroSellPoint
+
+singleBuyConfluenceOK = confluenceMinScore == 0 or westernSingleBuyScore >= confluenceMinScore
+singleSellConfluenceOK = confluenceMinScore == 0 or westernSingleSellScore >= confluenceMinScore
+
+multiBuyConfluenceOK = confluenceMinScore == 0 or westernMultiBuyScore >= confluenceMinScore
+multiSellConfluenceOK = confluenceMinScore == 0 or westernMultiSellScore >= confluenceMinScore
+
+contBuyConfluenceOK = confluenceMinScore == 0 or westernContBuyScore >= confluenceMinScore
+contSellConfluenceOK = confluenceMinScore == 0 or westernContSellScore >= confluenceMinScore
+
+microBuyConfluenceOK = confluenceMinScore == 0 or westernMicroBuyScore >= confluenceMinScore
+microSellConfluenceOK = confluenceMinScore == 0 or westernMicroSellScore >= confluenceMinScore
+
+// ============================================================================
+// 14. FINAL SIGNAL SELECTION
+// ============================================================================
+
+singleBuyBaseConfirm = barCloseOK and singleBuyBreakOK and buyTrendOK and rsiEntryBuyOK and macdHistEntryBuyOK and singleBuyConfluenceOK and strongBuyConfirmCandle
+singleSellBaseConfirm = barCloseOK and singleSellBreakOK and sellTrendOK and rsiEntrySellOK and macdHistEntrySellOK and singleSellConfluenceOK and strongSellConfirmCandle
+
+multiBuyBaseConfirm = barCloseOK and multiBullConfirmNow and buyTrendOK and rsiEntryBuyOK and macdHistEntryBuyOK and multiBuyConfluenceOK and (not useStrongConfirmCandle or strongBuyConfirmCandle) and albMultiBullOK
+multiSellBaseConfirm = barCloseOK and multiBearConfirmNow and sellTrendOK and rsiEntrySellOK and macdHistEntrySellOK and multiSellConfluenceOK and (not useStrongConfirmCandle or strongSellConfirmCandle) and albMultiBearOK
+
+continuationBuyBaseConfirm = barCloseOK and continuationBuySignal and buyTrendOK and rsiEntryBuyOK and macdHistEntryBuyOK and contBuyConfluenceOK and (not useStrongConfirmCandle or strongBuyConfirmCandle) and albContMicroOK
+continuationSellBaseConfirm = barCloseOK and continuationSellSignal and sellTrendOK and rsiEntrySellOK and macdHistEntrySellOK and contSellConfluenceOK and (not useStrongConfirmCandle or strongSellConfirmCandle) and albContMicroOK
+
+microBuyBaseConfirm = barCloseOK and microBuySignal and rsiEntryBuyOK and macdHistEntryBuyOK and microBuyConfluenceOK and (not useStrongConfirmCandle or strongBuyConfirmCandle) and albContMicroOK
+microSellBaseConfirm = barCloseOK and microSellSignal and rsiEntrySellOK and macdHistEntrySellOK and microSellConfluenceOK and (not useStrongConfirmCandle or strongSellConfirmCandle) and albContMicroOK
+
+// Priority:
+// 1. Micro Compression Breakout
+// 2. Continuation Pullback
+// 3. Multi-candle reversal
+// 4. Single-candle reversal
+useMicroBuy = microBuyBaseConfirm
+useMicroSell = microSellBaseConfirm
+
+useContBuy = not useMicroBuy and continuationBuyBaseConfirm
+useContSell = not useMicroSell and continuationSellBaseConfirm
+
+useMultiBuy = not useMicroBuy and not useContBuy and multiBuyBaseConfirm
+useMultiSell = not useMicroSell and not useContSell and multiSellBaseConfirm
+
+buyBaseConfirm = useMicroBuy or useContBuy or useMultiBuy or singleBuyBaseConfirm
+sellBaseConfirm = useMicroSell or useContSell or useMultiSell or singleSellBaseConfirm
+
+signalPatternCodeBuy = useMicroBuy ? 8 : useContBuy ? continuationBuyCode : useMultiBuy ? multiBullSignalCode : lastSingleBullCode
+signalPatternCodeSell = useMicroSell ? -8 : useContSell ? continuationSellCode : useMultiSell ? multiBearSignalCode : lastSingleBearCode
+
+signalSetupBarBuy = useMicroBuy ? bar_index : useContBuy ? bar_index : useMultiBuy ? bar_index : lastSingleBullSetupBar
+signalSetupBarSell = useMicroSell ? bar_index : useContSell ? bar_index : useMultiSell ? bar_index : lastSingleBearSetupBar
+
+signalSupportBuy = useMicroBuy ? microLow : useContBuy ? continuationSupportForDistance : useMultiBuy ? multiBullSupport : lastSingleBullSupport
+signalResistanceSell = useMicroSell ? microHigh : useContSell ? continuationResistanceForDistance : useMultiSell ? multiBearResistance : lastSingleBearResistance
+
+signalLowForBuySL = useMicroBuy ? microBuyLowForSL : useContBuy ? continuationBuyLowForSL : useMultiBuy ? multiBullLowForSL : lastSingleBullLow
+signalHighForSellSL = useMicroSell ? microSellHighForSL : useContSell ? continuationSellHighForSL : useMultiSell ? multiBearHighForSL : lastSingleBearHigh
+
+signalWesternBuyScore = useMicroBuy ? westernMicroBuyScore : useContBuy ? westernContBuyScore : useMultiBuy ? westernMultiBuyScore : westernSingleBuyScore
+signalWesternSellScore = useMicroSell ? westernMicroSellScore : useContSell ? westernContSellScore : useMultiSell ? westernMultiSellScore : westernSingleSellScore
+
+// ============================================================================
+// 15. ENTRY / SL / TP
+// ============================================================================
+
+buyEntry = close
+sellEntry = close
+
+slBuffer = atr * slBufferATR
+
+buySL = signalLowForBuySL - slBuffer
+sellSL = signalHighForSellSL + slBuffer
+
+buyRisk = buyEntry - buySL
+sellRisk = sellSL - sellEntry
+
+buyTP1 = buyEntry + buyRisk * rr1
+buyTP2 = buyEntry + buyRisk * rr2
+
+sellTP1 = sellEntry - sellRisk * rr1
+sellTP2 = sellEntry - sellRisk * rr2
+
+buyTPStrategy = strategyTPChoice == "TP1" ? buyTP1 : buyTP2
+sellTPStrategy = strategyTPChoice == "TP1" ? sellTP1 : sellTP2
+
+// ============================================================================
+// 15.1 QUALITY FILTERS
+// ============================================================================
+
+buyRoomToResistance = resistanceFresh ? resistance - buyEntry : na
+sellRoomToSupport = supportFresh ? sellEntry - support : na
+
+buyGeneralRoomOK = not useRoomFilter or (not na(buyRoomToResistance) and buyRoomToResistance > 0 and buyRoomToResistance >= buyRisk * minRoomR)
+sellGeneralRoomOK = not useRoomFilter or (not na(sellRoomToSupport) and sellRoomToSupport > 0 and sellRoomToSupport >= sellRisk * minRoomR)
+
+buyContRoomOK = not contUseRoomFilter or not useContBuy or (not na(buyRoomToResistance) and buyRoomToResistance > 0 and buyRoomToResistance >= buyRisk * contMinRoomR)
+sellContRoomOK = not contUseRoomFilter or not useContSell or (not na(sellRoomToSupport) and sellRoomToSupport > 0 and sellRoomToSupport >= sellRisk * contMinRoomR)
+
+buyMicroRoomOK = not microUseRoomFilter or not useMicroBuy or (not na(buyRoomToResistance) and buyRoomToResistance > 0 and buyRoomToResistance >= buyRisk * microMinRoomR)
+sellMicroRoomOK = not microUseRoomFilter or not useMicroSell or (not na(sellRoomToSupport) and sellRoomToSupport > 0 and sellRoomToSupport >= sellRisk * microMinRoomR)
+
+// Reversal room áp dụng cho Single Candle và Multi Reversal.
+// Không áp dụng cho Micro/Continuation vì 2 nhóm đó có room filter riêng.
+buyReversalRoomOK =
+     not useReversalRoomFilter or
+     useMicroBuy or
+     useContBuy or
+     (not na(buyRoomToResistance) and buyRoomToResistance > 0 and buyRoomToResistance >= buyRisk * reversalMinRoomR)
+
+sellReversalRoomOK =
+     not useReversalRoomFilter or
+     useMicroSell or
+     useContSell or
+     (not na(sellRoomToSupport) and sellRoomToSupport > 0 and sellRoomToSupport >= sellRisk * reversalMinRoomR)
+
+buyRoomOK = buyGeneralRoomOK and buyContRoomOK and buyMicroRoomOK and buyReversalRoomOK
+sellRoomOK = sellGeneralRoomOK and sellContRoomOK and sellMicroRoomOK and sellReversalRoomOK
+
+buyEntryDistanceFromSupport = not na(signalSupportBuy) ? math.abs(buyEntry - signalSupportBuy) : na
+sellEntryDistanceFromResistance = not na(signalResistanceSell) ? math.abs(signalResistanceSell - sellEntry) : na
+
+buyEntryDistanceOK = not useEntryDistanceFilter or useContBuy or useMicroBuy or (not na(buyEntryDistanceFromSupport) and buyEntryDistanceFromSupport <= atr * maxEntryDistanceATR)
+sellEntryDistanceOK = not useEntryDistanceFilter or useContSell or useMicroSell or (not na(sellEntryDistanceFromResistance) and sellEntryDistanceFromResistance <= atr * maxEntryDistanceATR)
+
+// Anti Chase:
+// BUY bị chặn nếu giá đang quá gần đỉnh recent range.
+// SELL bị chặn nếu giá đang quá gần đáy recent range.
+recentHigh = ta.highest(high, antiChaseLookback)
+recentLow = ta.lowest(low, antiChaseLookback)
+recentRange = recentHigh - recentLow
+
+buyAntiChaseOK =
+     not useAntiChaseFilter or
+     recentRange <= 0 or
+     close <= recentHigh - recentRange * antiChaseExtremePct
+
+sellAntiChaseOK =
+     not useAntiChaseFilter or
+     recentRange <= 0 or
+     close >= recentLow + recentRange * antiChaseExtremePct
+
+buyQualityOK =
+     buyRoomOK and
+     buyEntryDistanceOK and
+     buyAntiChaseOK and
+     adxFilterOK and
+     smcTrendBuyOK and
+     antiCrashBuyOK and
+     smcChopOK
+
+sellQualityOK =
+     sellRoomOK and
+     sellEntryDistanceOK and
+     sellAntiChaseOK and
+     adxFilterOK and
+     smcTrendSellOK and
+     antiCrashSellOK and
+     smcChopOK
+
+// Brooks bar quality: ap dung cho entry bar (bar ta dang o hien tai)
+validBuy = buyBaseConfirm and buyRisk > syminfo.mintick * minRiskTicks and buyQualityOK and brooksBullBarOK
+validSell = sellBaseConfirm and sellRisk > syminfo.mintick * minRiskTicks and sellQualityOK and brooksBearBarOK
+
+bothSignals = validBuy and validSell
+
+var int tradedBullSetupBar = na
+var int tradedBearSetupBar = na
+
+alreadyTradedBullSetup = not na(tradedBullSetupBar) and signalSetupBarBuy == tradedBullSetupBar
+alreadyTradedBearSetup = not na(tradedBearSetupBar) and signalSetupBarSell == tradedBearSetupBar
+
+// Nison: loc gio giao dich — London (7-16 UTC) + New York (13-21 UTC) liquid nhat
+sessionHour = hour(time, "UTC")
+sessionOK   = not useSessionFilter or (sessionHour >= sessionStartHour and sessionHour < sessionEndHour)
+
+tradeBuy  = validBuy  and not bothSignals and not alreadyTradedBullSetup and strategy.position_size <= 0 and sessionOK
+tradeSell = validSell and not bothSignals and not alreadyTradedBearSetup and strategy.position_size >= 0 and sessionOK
+
+// ============================================================================
+// 16. ORDER EXECUTION
+// ============================================================================
+
+var float activeLongSL  = na
+var float activeLongTP  = na
+var float activeLongTP1 = na   // BE Trail: TP1 = breakeven activation level
+var float activeLongTP2 = na   // BE Trail: TP2 = final target
+var float activeShortSL  = na
+var float activeShortTP  = na
+var float activeShortTP1 = na
+var float activeShortTP2 = na
+
+if tradeBuy
+    activeLongSL  := buySL
+    activeLongTP  := buyTPStrategy
+    activeLongTP1 := buyTP1       // BE activation at TP1 (rr1)
+    activeLongTP2 := buyTP2       // Final target at TP2 (rr2)
+    activeShortSL  := na
+    activeShortTP  := na
+    activeShortTP1 := na
+    activeShortTP2 := na
+    tradedBullSetupBar := signalSetupBarBuy
+    strategy.entry("LONG", strategy.long, comment="B")
+
+if tradeSell
+    activeShortSL  := sellSL
+    activeShortTP  := sellTPStrategy
+    activeShortTP1 := sellTP1     // BE activation at TP1
+    activeShortTP2 := sellTP2     // Final target at TP2
+    activeLongSL  := na
+    activeLongTP  := na
+    activeLongTP1 := na
+    activeLongTP2 := na
+    tradedBearSetupBar := signalSetupBarSell
+    strategy.entry("SHORT", strategy.short, comment="S")
+
+longExitText = hideTVExitText ? " " : "LONG EXIT"
+shortExitText = hideTVExitText ? " " : "SHORT EXIT"
+
+if not na(activeLongSL) and not na(activeLongTP)
+    if useBeTrail and not na(activeLongTP1) and not na(activeLongTP2)
+        // Breakeven Trail: thoat o TP2, trail kich hoat tai TP1 voi khoang cach = 1 risk unit
+        _lRiskTicks = math.max(1, math.round((activeLongTP1 - activeLongSL) / syminfo.mintick))
+        strategy.exit(id="XL", from_entry="LONG", stop=activeLongSL, limit=activeLongTP2,
+             trail_price=activeLongTP1, trail_offset=_lRiskTicks,
+             comment=longExitText, comment_profit=longExitText, comment_loss=longExitText)
+    else
+        strategy.exit(id="XL", from_entry="LONG", stop=activeLongSL, limit=activeLongTP,
+             comment=longExitText, comment_profit=longExitText, comment_loss=longExitText)
+
+if not na(activeShortSL) and not na(activeShortTP)
+    if useBeTrail and not na(activeShortTP1) and not na(activeShortTP2)
+        _sRiskTicks = math.max(1, math.round((activeShortSL - activeShortTP1) / syminfo.mintick))
+        strategy.exit(id="XS", from_entry="SHORT", stop=activeShortSL, limit=activeShortTP2,
+             trail_price=activeShortTP1, trail_offset=_sRiskTicks,
+             comment=shortExitText, comment_profit=shortExitText, comment_loss=shortExitText)
+    else
+        strategy.exit(id="XS", from_entry="SHORT", stop=activeShortSL, limit=activeShortTP,
+             comment=shortExitText, comment_profit=shortExitText, comment_loss=shortExitText)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    activeLongSL  := na
+    activeLongTP  := na
+    activeLongTP1 := na
+    activeLongTP2 := na
+    activeShortSL  := na
+    activeShortTP  := na
+    activeShortTP1 := na
+    activeShortTP2 := na
+
+// ============================================================================
+// 17. DASHBOARD
+// ============================================================================
+
+closedTrades = strategy.closedtrades
+winTrades = strategy.wintrades
+lossTrades = strategy.losstrades
+winRate = closedTrades > 0 ? winTrades / closedTrades * 100.0 : na
+
+var table htfTable = table.new(position.top_right, 6, 12, bgcolor=color.new(color.black, 85), frame_color=color.new(color.white, 70), frame_width=1, border_color=color.new(color.white, 80), border_width=1)
+
+if barstate.islast
+    if showHTFTable
+        headerBg = color.new(color.blue, 70)
+        normalBg = color.new(color.black, 85)
+
+        table.cell(htfTable, 0, 0, "TF", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 1, 0, "Trend", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 2, 0, "Close", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 3, 0, "EMA", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 4, 0, "Filter", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 5, 0, "Mode", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+
+        table.cell(htfTable, 0, 1, tf1, text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 1, 1, tf1TrendText, text_color=color.white, bgcolor=trendBg(bull1, bear1), text_size=size.small)
+        table.cell(htfTable, 2, 1, fmt(htfClose1), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 3, 1, fmt(emaFast1) + " / " + fmt(emaSlow1), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 4, 1, htfFilterMode == "Chi HTF2" ? "OFF" : "ON", text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 5, 1, requireHTFCloseSide ? "Close filter" : "EMA only", text_color=color.white, bgcolor=normalBg, text_size=size.small)
+
+        table.cell(htfTable, 0, 2, tf2, text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 1, 2, tf2TrendText, text_color=color.white, bgcolor=trendBg(bull2, bear2), text_size=size.small)
+        table.cell(htfTable, 2, 2, fmt(htfClose2), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 3, 2, fmt(emaFast2) + " / " + fmt(emaSlow2), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 4, 2, htfFilterMode == "Chi HTF1" ? "OFF" : "ON", text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 5, 2, htfFilterMode, text_color=color.white, bgcolor=normalBg, text_size=size.small)
+
+        table.cell(htfTable, 0, 3, "HTF", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 1, 3, tradeMode, text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 2, 3, "BUY " + boolText(buyTrendOK), text_color=color.white, bgcolor=statusBg(buyTrendOK), text_size=size.small)
+        table.cell(htfTable, 3, 3, "SELL " + boolText(sellTrendOK), text_color=color.white, bgcolor=statusBg(sellTrendOK), text_size=size.small)
+        table.cell(htfTable, 4, 3, "Min " + str.tostring(confluenceMinScore), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 5, 3, "Enabled " + str.tostring(enabledFilterCount), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+
+        table.cell(htfTable, 0, 4, "PATTERN", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 1, 4, "Single " + boolText(useSingleCandlePattern), text_color=color.white, bgcolor=statusBg(useSingleCandlePattern), text_size=size.small)
+        table.cell(htfTable, 2, 4, "3Bar " + boolText(useThreeBarPattern), text_color=color.white, bgcolor=statusBg(useThreeBarPattern), text_size=size.small)
+        table.cell(htfTable, 3, 4, "Star " + boolText(useMorningEveningPattern), text_color=color.white, bgcolor=statusBg(useMorningEveningPattern), text_size=size.small)
+        table.cell(htfTable, 4, 4, "Cluster " + boolText(useRejectionClusterPattern), text_color=color.white, bgcolor=statusBg(useRejectionClusterPattern), text_size=size.small)
+        table.cell(htfTable, 5, 4, "Cont " + boolText(useContinuationPattern), text_color=color.white, bgcolor=statusBg(useContinuationPattern), text_size=size.small)
+
+        table.cell(htfTable, 0, 5, "MICRO", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 1, 5, "ON " + boolText(useMicroBreakout), text_color=color.white, bgcolor=statusBg(useMicroBreakout), text_size=size.small)
+        table.cell(htfTable, 2, 5, "B " + boolText(microBuySignal), text_color=color.white, bgcolor=statusBg(microBuySignal), text_size=size.small)
+        table.cell(htfTable, 3, 5, "S " + boolText(microSellSignal), text_color=color.white, bgcolor=statusBg(microSellSignal), text_size=size.small)
+        table.cell(htfTable, 4, 5, "Range " + fmtNum(microRange), text_color=color.white, bgcolor=statusBg(microRangeOK), text_size=size.small)
+        table.cell(htfTable, 5, 5, "Bars " + str.tostring(microBars), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+
+        table.cell(htfTable, 0, 6, "CONT", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 1, 6, "B " + boolText(continuationBuySignal), text_color=color.white, bgcolor=statusBg(continuationBuySignal), text_size=size.small)
+        table.cell(htfTable, 2, 6, "S " + boolText(continuationSellSignal), text_color=color.white, bgcolor=statusBg(continuationSellSignal), text_size=size.small)
+        table.cell(htfTable, 3, 6, "Mode " + contEntryMode, text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 4, 6, "Slope B/S " + boolText(contEmaSlopeBull) + "/" + boolText(contEmaSlopeBear), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 5, 6, "Range " + fmtNum(contClusterRange), text_color=color.white, bgcolor=statusBg(contClusterRangeOK), text_size=size.small)
+
+        table.cell(htfTable, 0, 7, "RSI Gate", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 1, 7, "RSI " + fmtNum(rsi), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 2, 7, "BUY " + boolText(rsiEntryBuyOK), text_color=color.white, bgcolor=statusBg(rsiEntryBuyOK), text_size=size.small)
+        table.cell(htfTable, 3, 7, "SELL " + boolText(rsiEntrySellOK), text_color=color.white, bgcolor=statusBg(rsiEntrySellOK), text_size=size.small)
+        table.cell(htfTable, 4, 7, "OS " + fmtNum(rsiOversold), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 5, 7, "OB " + fmtNum(rsiOverbought), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+
+        table.cell(htfTable, 0, 8, "MACD", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 1, 8, "Hist " + fmtNum(macdHist), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 2, 8, "BUY " + boolText(macdHistEntryBuyOK), text_color=color.white, bgcolor=statusBg(macdHistEntryBuyOK), text_size=size.small)
+        table.cell(htfTable, 3, 8, "SELL " + boolText(macdHistEntrySellOK), text_color=color.white, bgcolor=statusBg(macdHistEntrySellOK), text_size=size.small)
+        table.cell(htfTable, 4, 8, "B Score " + boolText(macdBuyOKRaw), text_color=color.white, bgcolor=statusBg(macdBuyOKRaw), text_size=size.small)
+        table.cell(htfTable, 5, 8, "S Score " + boolText(macdSellOKRaw), text_color=color.white, bgcolor=statusBg(macdSellOKRaw), text_size=size.small)
+
+        table.cell(htfTable, 0, 9, "QUALITY", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 1, 9, "Room B/S " + boolText(buyRoomOK) + "/" + boolText(sellRoomOK), text_color=color.white, bgcolor=statusBg(buyRoomOK and sellRoomOK), text_size=size.small)
+        table.cell(htfTable, 2, 9, "Anti B/S " + boolText(buyAntiChaseOK) + "/" + boolText(sellAntiChaseOK), text_color=color.white, bgcolor=statusBg(buyAntiChaseOK and sellAntiChaseOK), text_size=size.small)
+        table.cell(htfTable, 3, 9, "ADX " + fmtNum(adxValue), text_color=color.white, bgcolor=statusBg(adxFilterOK), text_size=size.small)
+        table.cell(htfTable, 4, 9, "B Room " + fmtNum(buyRoomToResistance), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 5, 9, "S Room " + fmtNum(sellRoomToSupport), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+
+        ltfPatternText = useMicroBuy ? "Micro BUY" : useMicroSell ? "Micro SELL" : useContBuy ? "Cont BUY" : useContSell ? "Cont SELL" : useMultiBuy ? "Multi BUY" : useMultiSell ? "Multi SELL" : singleBullSetupRecent ? "Single Bull " + str.tostring(barsSinceSingleBullSetup) : singleBearSetupRecent ? "Single Bear " + str.tostring(barsSinceSingleBearSetup) : "No Recent Setup"
+        ltfZoneText = touchSupport ? "Now Support" : touchResistance ? "Now Resistance" : "No S/R Touch"
+        ltfConfirmText = buyBaseConfirm ? "Buy Confirm" : sellBaseConfirm ? "Sell Confirm" : "No Confirm"
+        ltfSignalText = tradeBuy ? "BUY TRADE" : tradeSell ? "SELL TRADE" : bothSignals ? "Both Blocked" : "No Signal"
+
+        table.cell(htfTable, 0, 10, showLTFDebugInTable ? "LTF" : "", text_color=color.white, bgcolor=showLTFDebugInTable ? headerBg : color.new(color.black, 100), text_size=size.small)
+        table.cell(htfTable, 1, 10, showLTFDebugInTable ? ltfPatternText : "", text_color=color.white, bgcolor=showLTFDebugInTable ? normalBg : color.new(color.black, 100), text_size=size.small)
+        table.cell(htfTable, 2, 10, showLTFDebugInTable ? ltfZoneText : "", text_color=color.white, bgcolor=showLTFDebugInTable ? normalBg : color.new(color.black, 100), text_size=size.small)
+        table.cell(htfTable, 3, 10, showLTFDebugInTable ? ltfConfirmText : "", text_color=color.white, bgcolor=showLTFDebugInTable ? normalBg : color.new(color.black, 100), text_size=size.small)
+        table.cell(htfTable, 4, 10, showLTFDebugInTable ? ltfSignalText : "", text_color=color.white, bgcolor=showLTFDebugInTable ? statusBg(tradeBuy or tradeSell) : color.new(color.black, 100), text_size=size.small)
+        table.cell(htfTable, 5, 10, showLTFDebugInTable ? "TP " + strategyTPChoice : "", text_color=color.white, bgcolor=showLTFDebugInTable ? normalBg : color.new(color.black, 100), text_size=size.small)
+
+        table.cell(htfTable, 0, 11, "STATS", text_color=color.white, bgcolor=headerBg, text_size=size.small)
+        table.cell(htfTable, 1, 11, "Trades " + str.tostring(closedTrades), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 2, 11, "Win " + str.tostring(winTrades), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 3, 11, "Loss " + str.tostring(lossTrades), text_color=color.white, bgcolor=normalBg, text_size=size.small)
+        table.cell(htfTable, 4, 11, "WR " + fmtPct(winRate), text_color=color.white, bgcolor=na(winRate) ? normalBg : winRate >= 50 ? color.new(color.green, 75) : color.new(color.red, 75), text_size=size.small)
+        table.cell(htfTable, 5, 11, "Net " + fmtNum(strategy.netprofit), text_color=color.white, bgcolor=strategy.netprofit >= 0 ? color.new(color.green, 80) : color.new(color.red, 80), text_size=size.small)
+    else
+        table.clear(htfTable, 0, 0, 5, 11)
+
+// ============================================================================
+// 18. DRAW LABELS
+// ============================================================================
+
+if showLabels and tradeBuy
+    _buyText = getSignalLabelText(true, buyEntry, buySL, buyTP1, buyTP2)
+    _buyPatternName = patternNameFromCode(signalPatternCodeBuy)
+
+    _buyTooltip = "BUY SETUP\n"
+    _buyTooltip := _buyTooltip + "-------------------------\n"
+    _buyTooltip := _buyTooltip + "Pattern: " + _buyPatternName + "\n"
+    _buyTooltip := _buyTooltip + "Entry: " + fmt(buyEntry) + "\n"
+    _buyTooltip := _buyTooltip + "Stop Loss: " + fmt(buySL) + "\n"
+    _buyTooltip := _buyTooltip + "TP1 RR " + str.tostring(rr1, "#.##") + ": " + fmt(buyTP1) + "\n"
+    _buyTooltip := _buyTooltip + "TP2 RR " + str.tostring(rr2, "#.##") + ": " + fmt(buyTP2) + "\n"
+    _buyTooltip := _buyTooltip + "Strategy TP: " + strategyTPChoice + "\n"
+    _buyTooltip := _buyTooltip + "Risk: " + fmt(buyRisk) + "\n\n"
+    _buyTooltip := _buyTooltip + "Reason:\n"
+    _buyTooltip := _buyTooltip + "HTF BUY: " + boolText(buyTrendOK) + "\n"
+    _buyTooltip := _buyTooltip + "Micro: " + boolText(useMicroBuy) + " | Range: " + fmtNum(microRange) + "\n"
+    _buyTooltip := _buyTooltip + "Continuation: " + boolText(useContBuy) + "\n"
+    _buyTooltip := _buyTooltip + "RSI Gate: " + boolText(rsiEntryBuyOK) + " | RSI: " + fmtNum(rsi) + "\n"
+    _buyTooltip := _buyTooltip + "MACD Gate: " + boolText(macdHistEntryBuyOK) + " | Hist: " + fmtNum(macdHist) + "\n"
+    _buyTooltip := _buyTooltip + "Room: " + boolText(buyRoomOK) + " | Room to R: " + fmtNum(buyRoomToResistance) + "\n"
+    _buyTooltip := _buyTooltip + "Anti Chase: " + boolText(buyAntiChaseOK) + "\n"
+    _buyTooltip := _buyTooltip + "ADX: " + boolText(adxFilterOK) + " | " + fmtNum(adxValue) + "\n"
+    _buyTooltip := _buyTooltip + "Western Score: " + str.tostring(signalWesternBuyScore) + "/" + str.tostring(enabledFilterCount) + "\n"
+
+    _buyLabel = label.new(bar_index, low, _buyText, style=label.style_label_up, color=buyLabelBgColor, textcolor=buyLabelTextColor, size=getSignalLabelSize(), tooltip=_buyTooltip)
+    rememberLabel(_buyLabel)
+
+if showLabels and tradeSell
+    _sellText = getSignalLabelText(false, sellEntry, sellSL, sellTP1, sellTP2)
+    _sellPatternName = patternNameFromCode(signalPatternCodeSell)
+
+    _sellTooltip = "SELL SETUP\n"
+    _sellTooltip := _sellTooltip + "-------------------------\n"
+    _sellTooltip := _sellTooltip + "Pattern: " + _sellPatternName + "\n"
+    _sellTooltip := _sellTooltip + "Entry: " + fmt(sellEntry) + "\n"
+    _sellTooltip := _sellTooltip + "Stop Loss: " + fmt(sellSL) + "\n"
+    _sellTooltip := _sellTooltip + "TP1 RR " + str.tostring(rr1, "#.##") + ": " + fmt(sellTP1) + "\n"
+    _sellTooltip := _sellTooltip + "TP2 RR " + str.tostring(rr2, "#.##") + ": " + fmt(sellTP2) + "\n"
+    _sellTooltip := _sellTooltip + "Strategy TP: " + strategyTPChoice + "\n"
+    _sellTooltip := _sellTooltip + "Risk: " + fmt(sellRisk) + "\n\n"
+    _sellTooltip := _sellTooltip + "Reason:\n"
+    _sellTooltip := _sellTooltip + "HTF SELL: " + boolText(sellTrendOK) + "\n"
+    _sellTooltip := _sellTooltip + "Micro: " + boolText(useMicroSell) + " | Range: " + fmtNum(microRange) + "\n"
+    _sellTooltip := _sellTooltip + "Continuation: " + boolText(useContSell) + "\n"
+    _sellTooltip := _sellTooltip + "RSI Gate: " + boolText(rsiEntrySellOK) + " | RSI: " + fmtNum(rsi) + "\n"
+    _sellTooltip := _sellTooltip + "MACD Gate: " + boolText(macdHistEntrySellOK) + " | Hist: " + fmtNum(macdHist) + "\n"
+    _sellTooltip := _sellTooltip + "Room: " + boolText(sellRoomOK) + " | Room to S: " + fmtNum(sellRoomToSupport) + "\n"
+    _sellTooltip := _sellTooltip + "Anti Chase: " + boolText(sellAntiChaseOK) + "\n"
+    _sellTooltip := _sellTooltip + "ADX: " + boolText(adxFilterOK) + " | " + fmtNum(adxValue) + "\n"
+    _sellTooltip := _sellTooltip + "Western Score: " + str.tostring(signalWesternSellScore) + "/" + str.tostring(enabledFilterCount) + "\n"
+
+    _sellLabel = label.new(bar_index, high, _sellText, style=label.style_label_down, color=sellLabelBgColor, textcolor=sellLabelTextColor, size=getSignalLabelSize(), tooltip=_sellTooltip)
+    rememberLabel(_sellLabel)
+
+// ============================================================================
+// 19. DRAW ENTRY / SL / TP LINES
+// ============================================================================
+
+if showLines and tradeBuy
+    drawTradeLevel(buyEntry, "Entry", entryColor, line.style_solid)
+    drawTradeLevel(buySL, "SL", slColor, line.style_dashed)
+    drawTradeLevel(buyTP1, "TP1", tpColor, line.style_dashed)
+    drawTradeLevel(buyTP2, "TP2", tpColor, line.style_dashed)
+
+if showLines and tradeSell
+    drawTradeLevel(sellEntry, "Entry", entryColor, line.style_solid)
+    drawTradeLevel(sellSL, "SL", slColor, line.style_dashed)
+    drawTradeLevel(sellTP1, "TP1", tpColor, line.style_dashed)
+    drawTradeLevel(sellTP2, "TP2", tpColor, line.style_dashed)
+
+// ============================================================================
+// 20. ALERT CONDITIONS
+// ============================================================================
+
+alertcondition(tradeBuy, title="BUY Trade", message="BUY Trade: HTF + Reversal/Continuation/Micro Breakout + Quality Filters")
+alertcondition(tradeSell, title="SELL Trade", message="SELL Trade: HTF + Reversal/Continuation/Micro Breakout + Quality Filters")
