@@ -1,0 +1,793 @@
+//@version=6
+strategy("Nison Test - Three Bar + Rejection Cluster Reversal", overlay=true, pyramiding=0, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.0, slippage=0, process_orders_on_close=true, max_labels_count=300, max_lines_count=300)
+
+// ============================================================================
+// 1. INPUTS
+// ============================================================================
+
+// Pattern toggles
+useThreeBarPattern = input.bool(true, "Bat Three Bar Reversal")
+useRejectionClusterPattern = input.bool(false, "Bat Rejection Cluster Reversal")
+useEngulfingPattern = input.bool(false, "Bat Engulfing Rejection")
+patternPriority = input.string("Block neu ca hai", "Xu ly khi BUY va SELL cung xuat hien", options=["Block neu ca hai", "Uu tien Three Bar", "Uu tien Cluster"])
+tradeDirection = input.string("Short only", "Huong giao dich", options=["Both", "Long only", "Short only"])
+
+// Support / Resistance context
+pivotLeftBars = input.int(5, "S/R Pivot left bars", minval=1)
+pivotRightBars = input.int(5, "S/R Pivot right bars", minval=1)
+maxSRAgeBars = input.int(120, "S/R con hieu luc toi da, 0 = khong gioi han", minval=0)
+atrLen = input.int(14, "ATR Length", minval=1)
+zoneATR = input.float(0.75, "Do rong vung S/R theo ATR", minval=0.0, step=0.05)
+
+useSRMultiTest = input.bool(false, "Yeu cau S/R duoc test nhieu lan")
+srMinTouches = input.int(2, "So lan test S/R toi thieu", minval=1, maxval=5)
+srTouchLookback = input.int(60, "Lookback dem test S/R", minval=10, maxval=200)
+
+// Three Bar Reversal
+threeBarRequireBreakHighLow = input.bool(true, "Three Bar: Nen 3 phai pha High/Low nen 2")
+
+// Rejection Cluster Reversal
+clusterLookbackBars = input.int(4, "Cluster: So nen trong cum", minval=3, maxval=5)
+clusterMinRejectBars = input.int(2, "Cluster: So nen rejection toi thieu", minval=1, maxval=5)
+clusterWickPct = input.float(0.45, "Cluster: Ty le rau rejection toi thieu", minval=0.1, maxval=1.0, step=0.05)
+useClusterQualityFilters = input.bool(true, "Cluster: Bat bo loc chat luong giam lenh risk")
+clusterMinQualityScore = input.int(4, "Cluster: Diem chat luong toi thieu", minval=1, maxval=6)
+clusterMinSignalBodyPct = input.float(0.25, "Cluster: Than nen signal toi thieu", minval=0.0, maxval=1.0, step=0.05)
+clusterCloseExtremePct = input.float(0.30, "Cluster: Close phai o top/bottom X% range", minval=0.10, maxval=0.50, step=0.05)
+clusterRequireCloseBeyondPrevBody = input.bool(true, "Cluster: Close phai vuot than nen truoc")
+clusterRequireReclaimSR = input.bool(true, "Cluster: Close phai reclaim lai S/R")
+clusterReclaimZonePct = input.float(0.0, "Cluster: Reclaim sau vao trong zone", minval=0.0, maxval=1.0, step=0.05)
+clusterUseMaxRangeFilter = input.bool(true, "Cluster: Gioi han range cum theo ATR")
+clusterMaxRangeATR = input.float(2.5, "Cluster: Range cum toi da theo ATR", minval=0.2, step=0.1)
+clusterUseAntiCrash = input.bool(true, "Cluster: Khong bat nguoc sau 3 nen momentum")
+showClusterDebugMarks = input.bool(false, "Cluster: Hien marker raw/blocked de debug")
+
+useRollingRangeContext = input.bool(true, "Cluster: Cho phep rejection tai bien range gan nhat")
+rangeContextLookback = input.int(48, "Cluster Range: So nen xac dinh range", minval=10, maxval=200)
+rangeContextZoneATR = input.float(0.85, "Cluster Range: Do rong bien range theo ATR", minval=0.10, maxval=2.00, step=0.05)
+rangeContextMinWidthATR = input.float(2.0, "Cluster Range: Do rong range toi thieu theo ATR", minval=0.50, step=0.10)
+
+useFVGContext = input.bool(true, "Cluster: Cho phep rejection tai FVG")
+fvgMinGapATR = input.float(0.20, "FVG: Gap toi thieu theo ATR", minval=0.0, step=0.05)
+fvgMaxAgeBars = input.int(120, "FVG: So nen con hieu luc", minval=1, maxval=300)
+
+useOBContext = input.bool(true, "Cluster: Cho phep rejection tai Order Block")
+obImpulseATR = input.float(0.80, "OB: Nen impulse toi thieu theo ATR", minval=0.10, step=0.10)
+obMaxAgeBars = input.int(140, "OB: So nen con hieu luc", minval=1, maxval=300)
+
+useSweepFilter = input.bool(false, "Liquidity Sweep: Yeu cau quet dinh/day roi reclaim")
+sweepLookback = input.int(12, "Sweep: Lookback dinh/day", minval=3, maxval=100)
+sweepPenetrationATR = input.float(0.05, "Sweep: Do xuyen toi thieu theo ATR", minval=0.0, step=0.01)
+
+useDisplacementFilter = input.bool(true, "Displacement: Yeu cau nen reclaim co than manh")
+displacementBodyATR = input.float(0.35, "Displacement: Than nen toi thieu theo ATR", minval=0.0, step=0.05)
+
+useMaxRiskATRFilter = input.bool(false, "Risk filter: Gioi han risk theo ATR")
+maxRiskATR = input.float(2.20, "Risk filter: Risk toi da theo ATR", minval=0.10, step=0.10)
+
+useStructureFilter = input.bool(false, "Loc Market Structure BOS/CHOCH cung huong")
+structurePivotLen = input.int(3, "Structure: Pivot length", minval=1, maxval=20)
+structureMaxAgeBars = input.int(80, "Structure: So nen sau BOS/CHOCH con hieu luc", minval=1, maxval=300)
+
+useSetupScoreFilter = input.bool(true, "Setup Score: Loc lenh theo diem chat luong")
+minBuySetupScore = input.int(5, "Setup Score: Diem BUY toi thieu", minval=0, maxval=12)
+minSellSetupScore = input.int(5, "Setup Score: Diem SELL toi thieu", minval=0, maxval=12)
+contextMode = input.string("All", "Context mode", options=["Pivot/Range only", "FVG only", "OB only", "FVG + OB", "All"])
+minPivotRangeScore = input.int(4, "Score toi thieu Pivot/Range", minval=0, maxval=10)
+minFVGScore = input.int(4, "Score toi thieu FVG", minval=0, maxval=10)
+minOBScore = input.int(4, "Score toi thieu OB", minval=0, maxval=10)
+minThreeBarScore = input.int(5, "Score toi thieu Three Bar", minval=0, maxval=10)
+minEngulfingScore = input.int(5, "Score toi thieu Engulfing", minval=0, maxval=10)
+
+// Optional confirmation
+entryMode = input.string("Vao ngay khi mau hinh hoan thanh", "Cach vao lenh", options=["Vao ngay khi mau hinh hoan thanh", "Can them nen xac nhan"])
+confirmMode = input.string("Close vuot than nen", "Kieu xac nhan", options=["Close vuot High/Low", "Close vuot than nen"])
+confirmWithinBars = input.int(2, "So nen cho xac nhan", minval=1, maxval=5)
+confirmedBarOnly = input.bool(true, "Chi vao lenh khi nen dong")
+
+// Optional filters are off by default so the test focuses on rejection quality first.
+useHTFFilter = input.bool(false, "Loc xu huong HTF EMA")
+htfTf = input.timeframe("240", "HTF")
+emaFastLen = input.int(50, "HTF EMA nhanh", minval=1)
+emaSlowLen = input.int(200, "HTF EMA cham", minval=1)
+tradeMode = input.string("Theo xu huong HTF", "Che do HTF", options=["Theo xu huong HTF", "Dao chieu nguoc HTF"])
+
+useSessionFilter = input.bool(true, "Loc gio giao dich UTC")
+sessionStartHour = input.int(8, "Session start hour UTC", minval=0, maxval=23)
+sessionEndHour = input.int(22, "Session end hour UTC", minval=0, maxval=23)
+
+useRoomFilter = input.bool(false, "Yeu cau room toi S/R doi dien")
+minRoomR = input.float(1.0, "Room toi thieu theo R", minval=0.0, step=0.1)
+
+useAntiChaseFilter = input.bool(true, "Khong BUY gan dinh / SELL gan day recent range")
+antiChaseLookback = input.int(24, "Anti Chase lookback", minval=5, maxval=100)
+antiChaseExtremePct = input.float(0.25, "Vung cam gan dinh/day", minval=0.05, maxval=0.50, step=0.05)
+
+useLTFTrendFilter = input.bool(false, "LTF Trend: Loc theo EMA nhanh/cham")
+ltfFastEmaLen = input.int(20, "LTF Trend: EMA nhanh", minval=1)
+ltfSlowEmaLen = input.int(50, "LTF Trend: EMA cham", minval=1)
+useLTFPullbackZone = input.bool(false, "LTF Trend: Yeu cau entry gan EMA nhanh")
+ltfPullbackZoneATR = input.float(0.80, "LTF Trend: Khoang cach toi EMA theo ATR", minval=0.0, step=0.05)
+
+// Risk / reward
+rr1 = input.float(2.0, "TP1 Risk:Reward", minval=2.0, step=0.1)
+rr2 = input.float(3.0, "TP2 Risk:Reward", minval=2.0, step=0.1)
+strategyTPChoice = input.string("TP1", "Backtest chot loi tai", options=["TP1", "TP2"])
+slBufferATR = input.float(0.10, "SL buffer theo ATR", minval=0.0, step=0.05)
+minRiskTicks = input.int(2, "Risk toi thieu theo tick", minval=1)
+effectiveRr2 = math.max(rr2, rr1)
+
+// Visuals
+showSR = input.bool(true, "Hien thi S/R")
+showLabels = input.bool(true, "Hien thi label")
+labelDisplayMode = input.string("Gon B/S", "Kieu hien thi label", options=["Gon B/S", "Full"])
+showLines = input.bool(true, "Hien thi Entry/SL/TP")
+lineLength = input.int(25, "Do dai line", minval=1)
+
+// ============================================================================
+// 2. HELPERS
+// ============================================================================
+
+fmt(_price) =>
+    str.tostring(_price, format.mintick)
+
+boolText(_value) =>
+    _value ? "OK" : "BLOCK"
+
+patternName(_code) =>
+    _code == 3 ? "Three Bar Bullish Reversal" :
+     _code == 5 ? "Bullish Rejection Cluster" :
+     _code == 7 ? "Bullish Engulfing Rejection" :
+     _code == -3 ? "Three Bar Bearish Reversal" :
+     _code == -5 ? "Bearish Rejection Cluster" :
+     _code == -7 ? "Bearish Engulfing Rejection" :
+     "Unknown"
+
+labelText(_isBuy, _patternCode, _entry, _sl, _tp1, _tp2) =>
+    _compact = _isBuy ? "B" : "S"
+    _full = (_isBuy ? "BUY" : "SELL") + "\n" + patternName(_patternCode) + "\nEntry " + fmt(_entry) + "\nSL " + fmt(_sl) + "\nTP1 " + fmt(_tp1) + "\nTP2 " + fmt(_tp2)
+    labelDisplayMode == "Gon B/S" ? _compact : _full
+
+labelSize() =>
+    labelDisplayMode == "Gon B/S" ? size.normal : size.small
+
+drawTradeLevel(_price, _name, _color, _style) =>
+    line.new(bar_index, _price, bar_index + lineLength, _price, color=_color, style=_style, width=1)
+    label.new(bar_index + lineLength, _price, _name + " " + fmt(_price), style=label.style_label_left, color=_color, textcolor=color.white, size=size.tiny)
+
+// ============================================================================
+// 3. S/R LOGIC
+// ============================================================================
+
+atr = ta.atr(atrLen)
+zoneSize = atr * zoneATR
+
+pivotHigh = ta.pivothigh(high, pivotLeftBars, pivotRightBars)
+pivotLow = ta.pivotlow(low, pivotLeftBars, pivotRightBars)
+
+var float resistance = na
+var float support = na
+var int resistanceBar = na
+var int supportBar = na
+
+if not na(pivotHigh)
+    resistance := pivotHigh
+    resistanceBar := bar_index - pivotRightBars
+
+if not na(pivotLow)
+    support := pivotLow
+    supportBar := bar_index - pivotRightBars
+
+supportFresh = not na(support) and not na(supportBar) and (maxSRAgeBars == 0 or bar_index - supportBar <= maxSRAgeBars)
+resistanceFresh = not na(resistance) and not na(resistanceBar) and (maxSRAgeBars == 0 or bar_index - resistanceBar <= maxSRAgeBars)
+
+supportTouchCount = 0
+resistanceTouchCount = 0
+
+if useSRMultiTest and supportFresh
+    for i = 1 to srTouchLookback
+        if low[i] <= support + zoneSize and close[i] >= support - zoneSize
+            supportTouchCount += 1
+
+if useSRMultiTest and resistanceFresh
+    for i = 1 to srTouchLookback
+        if high[i] >= resistance - zoneSize and close[i] <= resistance + zoneSize
+            resistanceTouchCount += 1
+
+supportMultiTestOK = not useSRMultiTest or supportTouchCount >= srMinTouches
+resistanceMultiTestOK = not useSRMultiTest or resistanceTouchCount >= srMinTouches
+
+plot(showSR and supportFresh ? support : na, title="Support", color=color.new(color.green, 0), style=plot.style_linebr)
+plot(showSR and resistanceFresh ? resistance : na, title="Resistance", color=color.new(color.red, 0), style=plot.style_linebr)
+
+// ============================================================================
+// 4. HTF + SESSION FILTERS
+// ============================================================================
+
+htfClose = request.security(syminfo.tickerid, htfTf, close[1], lookahead=barmerge.lookahead_on)
+htfEmaFast = request.security(syminfo.tickerid, htfTf, ta.ema(close, emaFastLen)[1], lookahead=barmerge.lookahead_on)
+htfEmaSlow = request.security(syminfo.tickerid, htfTf, ta.ema(close, emaSlowLen)[1], lookahead=barmerge.lookahead_on)
+
+htfBull = htfEmaFast > htfEmaSlow and htfClose > htfEmaFast
+htfBear = htfEmaFast < htfEmaSlow and htfClose < htfEmaFast
+
+ltfEmaFast = ta.ema(close, ltfFastEmaLen)
+ltfEmaSlow = ta.ema(close, ltfSlowEmaLen)
+ltfBullTrend = ltfEmaFast > ltfEmaSlow and close >= ltfEmaSlow
+ltfBearTrend = ltfEmaFast < ltfEmaSlow and close <= ltfEmaSlow
+ltfBullPullbackOK = not useLTFPullbackZone or math.abs(close - ltfEmaFast) <= atr * ltfPullbackZoneATR or low <= ltfEmaFast
+ltfBearPullbackOK = not useLTFPullbackZone or math.abs(close - ltfEmaFast) <= atr * ltfPullbackZoneATR or high >= ltfEmaFast
+ltfBullScoreBonus = ltfBullTrend and ltfBullPullbackOK
+ltfBearScoreBonus = ltfBearTrend and ltfBearPullbackOK
+ltfBuyTrendOK = not useLTFTrendFilter or (ltfBullTrend and ltfBullPullbackOK)
+ltfSellTrendOK = not useLTFTrendFilter or (ltfBearTrend and ltfBearPullbackOK)
+
+buyTrendOK = not useHTFFilter or (tradeMode == "Theo xu huong HTF" ? htfBull : htfBear)
+sellTrendOK = not useHTFFilter or (tradeMode == "Theo xu huong HTF" ? htfBear : htfBull)
+
+sessionHour = hour(time, "UTC")
+sessionSameDayOK = sessionHour >= sessionStartHour and sessionHour < sessionEndHour
+sessionOvernightOK = sessionHour >= sessionStartHour or sessionHour < sessionEndHour
+sessionOK = not useSessionFilter or (sessionStartHour < sessionEndHour ? sessionSameDayOK : sessionOvernightOK)
+
+barCloseOK = not confirmedBarOnly or barstate.isconfirmed
+
+structurePivotHigh = ta.pivothigh(high, structurePivotLen, structurePivotLen)
+structurePivotLow = ta.pivotlow(low, structurePivotLen, structurePivotLen)
+
+var float lastStructureHigh = na
+var float lastStructureLow = na
+var int structureBias = 0
+var int lastBullStructureBar = na
+var int lastBearStructureBar = na
+
+bullStructureBreak = not na(lastStructureHigh) and close > lastStructureHigh and close[1] <= lastStructureHigh
+bearStructureBreak = not na(lastStructureLow) and close < lastStructureLow and close[1] >= lastStructureLow
+
+if bullStructureBreak
+    structureBias := 1
+    lastBullStructureBar := bar_index
+
+if bearStructureBreak
+    structureBias := -1
+    lastBearStructureBar := bar_index
+
+if not na(structurePivotHigh)
+    lastStructureHigh := structurePivotHigh
+
+if not na(structurePivotLow)
+    lastStructureLow := structurePivotLow
+
+bullStructureRecent = not na(lastBullStructureBar) and bar_index - lastBullStructureBar <= structureMaxAgeBars
+bearStructureRecent = not na(lastBearStructureBar) and bar_index - lastBearStructureBar <= structureMaxAgeBars
+structureBuyOK = not useStructureFilter or (structureBias == 1 and bullStructureRecent)
+structureSellOK = not useStructureFilter or (structureBias == -1 and bearStructureRecent)
+
+// ============================================================================
+// 5. PATTERN LOGIC
+// ============================================================================
+
+// Three Bar Reversal:
+// Bull: bar 2 makes lower low, bar 3 closes bullish and preferably breaks bar 2 high.
+// Bear: bar 2 makes higher high, bar 3 closes bearish and preferably breaks bar 2 low.
+lowestLow3 = ta.lowest(low, 3)
+highestHigh3 = ta.highest(high, 3)
+
+threeBarBullBasic = low[1] < low[2] and low[1] < low and close > open and close > close[1]
+threeBarBearBasic = high[1] > high[2] and high[1] > high and close < open and close < close[1]
+
+threeBarBullPattern = threeBarRequireBreakHighLow ? threeBarBullBasic and close > high[1] : threeBarBullBasic
+threeBarBearPattern = threeBarRequireBreakHighLow ? threeBarBearBasic and close < low[1] : threeBarBearBasic
+
+touchSupport3 = supportFresh and supportMultiTestOK and lowestLow3 <= support + zoneSize and close >= support - zoneSize
+touchResistance3 = resistanceFresh and resistanceMultiTestOK and highestHigh3 >= resistance - zoneSize and close <= resistance + zoneSize
+
+priorSweepLow = ta.lowest(low[1], sweepLookback)
+priorSweepHigh = ta.highest(high[1], sweepLookback)
+sweepBuffer = atr * sweepPenetrationATR
+bullLiquiditySweep = low < priorSweepLow - sweepBuffer and close > priorSweepLow
+bearLiquiditySweep = high > priorSweepHigh + sweepBuffer and close < priorSweepHigh
+signalBodyATR = atr > 0 ? math.abs(close - open) / atr : 0.0
+bullDisplacement = close > open and signalBodyATR >= displacementBodyATR and close > math.max(open[1], close[1])
+bearDisplacement = close < open and signalBodyATR >= displacementBodyATR and close < math.min(open[1], close[1])
+
+threeBarBullSetupScore = (touchSupport3 ? 1 : 0) + (threeBarBullPattern ? 2 : 0) + (bullLiquiditySweep ? 2 : 0) + (bullDisplacement ? 1 : 0) + (ltfBullScoreBonus ? 1 : 0) + (htfBull ? 1 : 0) + (structureBias == 1 and bullStructureRecent ? 1 : 0)
+threeBarBearSetupScore = (touchResistance3 ? 1 : 0) + (threeBarBearPattern ? 2 : 0) + (bearLiquiditySweep ? 2 : 0) + (bearDisplacement ? 1 : 0) + (ltfBearScoreBonus ? 1 : 0) + (htfBear ? 1 : 0) + (structureBias == -1 and bearStructureRecent ? 1 : 0)
+threeBarBullScoreOK = not useSetupScoreFilter or threeBarBullSetupScore >= minThreeBarScore
+threeBarBearScoreOK = not useSetupScoreFilter or threeBarBearSetupScore >= minThreeBarScore
+
+threeBarBullSignalNow = useThreeBarPattern and threeBarBullPattern and touchSupport3 and (not useSweepFilter or bullLiquiditySweep) and (not useDisplacementFilter or bullDisplacement) and threeBarBullScoreOK
+threeBarBearSignalNow = useThreeBarPattern and threeBarBearPattern and touchResistance3 and (not useSweepFilter or bearLiquiditySweep) and (not useDisplacementFilter or bearDisplacement) and threeBarBearScoreOK
+
+// Rejection Cluster Reversal:
+// Bull cluster requires repeated lower-wick rejection near support and a bullish close.
+// Bear cluster requires repeated upper-wick rejection near resistance and a bearish close.
+range0 = high - low
+range1 = high[1] - low[1]
+range2 = high[2] - low[2]
+range3 = high[3] - low[3]
+range4 = high[4] - low[4]
+
+lowerWick0 = math.min(open, close) - low
+lowerWick1 = math.min(open[1], close[1]) - low[1]
+lowerWick2 = math.min(open[2], close[2]) - low[2]
+lowerWick3 = math.min(open[3], close[3]) - low[3]
+lowerWick4 = math.min(open[4], close[4]) - low[4]
+
+upperWick0 = high - math.max(open, close)
+upperWick1 = high[1] - math.max(open[1], close[1])
+upperWick2 = high[2] - math.max(open[2], close[2])
+upperWick3 = high[3] - math.max(open[3], close[3])
+upperWick4 = high[4] - math.max(open[4], close[4])
+
+rangeSupport = ta.lowest(low[clusterLookbackBars], rangeContextLookback)
+rangeResistance = ta.highest(high[clusterLookbackBars], rangeContextLookback)
+rangeContextWidth = rangeResistance - rangeSupport
+rangeContextZone = atr * rangeContextZoneATR
+rangeContextOK = useRollingRangeContext and rangeContextWidth >= atr * rangeContextMinWidthATR
+
+bullFVGNow = low > high[2] and low - high[2] >= atr * fvgMinGapATR
+bearFVGNow = high < low[2] and low[2] - high >= atr * fvgMinGapATR
+
+var float bullFvgLow = na
+var float bullFvgHigh = na
+var int bullFvgBar = na
+var float bearFvgLow = na
+var float bearFvgHigh = na
+var int bearFvgBar = na
+
+if bullFVGNow
+    bullFvgLow := high[2]
+    bullFvgHigh := low
+    bullFvgBar := bar_index
+
+if bearFVGNow
+    bearFvgLow := high
+    bearFvgHigh := low[2]
+    bearFvgBar := bar_index
+
+if not bullFVGNow and not na(bullFvgLow) and close < bullFvgLow
+    bullFvgLow := na
+    bullFvgHigh := na
+    bullFvgBar := na
+
+if not bearFVGNow and not na(bearFvgHigh) and close > bearFvgHigh
+    bearFvgLow := na
+    bearFvgHigh := na
+    bearFvgBar := na
+
+bullFvgAge = not na(bullFvgBar) ? bar_index - bullFvgBar : na
+bearFvgAge = not na(bearFvgBar) ? bar_index - bearFvgBar : na
+bullFvgFresh = useFVGContext and not na(bullFvgLow) and not na(bullFvgHigh) and not na(bullFvgAge) and bullFvgAge > clusterLookbackBars and bullFvgAge <= fvgMaxAgeBars
+bearFvgFresh = useFVGContext and not na(bearFvgLow) and not na(bearFvgHigh) and not na(bearFvgAge) and bearFvgAge > clusterLookbackBars and bearFvgAge <= fvgMaxAgeBars
+
+obImpulseBody = math.abs(close - open)
+bullOBNow = close > open and close > high[1] and close[1] < open[1] and obImpulseBody >= atr * obImpulseATR
+bearOBNow = close < open and close < low[1] and close[1] > open[1] and obImpulseBody >= atr * obImpulseATR
+
+var float bullObLow = na
+var float bullObHigh = na
+var int bullObBar = na
+var float bearObLow = na
+var float bearObHigh = na
+var int bearObBar = na
+
+if bullOBNow
+    bullObLow := low[1]
+    bullObHigh := math.max(open[1], close[1])
+    bullObBar := bar_index
+
+if bearOBNow
+    bearObLow := math.min(open[1], close[1])
+    bearObHigh := high[1]
+    bearObBar := bar_index
+
+if not bullOBNow and not na(bullObLow) and close < bullObLow
+    bullObLow := na
+    bullObHigh := na
+    bullObBar := na
+
+if not bearOBNow and not na(bearObHigh) and close > bearObHigh
+    bearObLow := na
+    bearObHigh := na
+    bearObBar := na
+
+bullObAge = not na(bullObBar) ? bar_index - bullObBar : na
+bearObAge = not na(bearObBar) ? bar_index - bearObBar : na
+bullObFresh = useOBContext and not na(bullObLow) and not na(bullObHigh) and not na(bullObAge) and bullObAge > clusterLookbackBars and bullObAge <= obMaxAgeBars
+bearObFresh = useOBContext and not na(bearObLow) and not na(bearObHigh) and not na(bearObAge) and bearObAge > clusterLookbackBars and bearObAge <= obMaxAgeBars
+
+nearPivotSupport0 = supportFresh and low <= support + zoneSize and close >= support - zoneSize
+nearPivotSupport1 = supportFresh and low[1] <= support + zoneSize and close[1] >= support - zoneSize
+nearPivotSupport2 = supportFresh and low[2] <= support + zoneSize and close[2] >= support - zoneSize
+nearPivotSupport3 = supportFresh and low[3] <= support + zoneSize and close[3] >= support - zoneSize
+nearPivotSupport4 = supportFresh and low[4] <= support + zoneSize and close[4] >= support - zoneSize
+
+nearPivotResistance0 = resistanceFresh and high >= resistance - zoneSize and close <= resistance + zoneSize
+nearPivotResistance1 = resistanceFresh and high[1] >= resistance - zoneSize and close[1] <= resistance + zoneSize
+nearPivotResistance2 = resistanceFresh and high[2] >= resistance - zoneSize and close[2] <= resistance + zoneSize
+nearPivotResistance3 = resistanceFresh and high[3] >= resistance - zoneSize and close[3] <= resistance + zoneSize
+nearPivotResistance4 = resistanceFresh and high[4] >= resistance - zoneSize and close[4] <= resistance + zoneSize
+
+nearRangeSupport0 = rangeContextOK and low <= rangeSupport + rangeContextZone and close >= rangeSupport - rangeContextZone
+nearRangeSupport1 = rangeContextOK and low[1] <= rangeSupport + rangeContextZone and close[1] >= rangeSupport - rangeContextZone
+nearRangeSupport2 = rangeContextOK and low[2] <= rangeSupport + rangeContextZone and close[2] >= rangeSupport - rangeContextZone
+nearRangeSupport3 = rangeContextOK and low[3] <= rangeSupport + rangeContextZone and close[3] >= rangeSupport - rangeContextZone
+nearRangeSupport4 = rangeContextOK and low[4] <= rangeSupport + rangeContextZone and close[4] >= rangeSupport - rangeContextZone
+
+nearRangeResistance0 = rangeContextOK and high >= rangeResistance - rangeContextZone and close <= rangeResistance + rangeContextZone
+nearRangeResistance1 = rangeContextOK and high[1] >= rangeResistance - rangeContextZone and close[1] <= rangeResistance + rangeContextZone
+nearRangeResistance2 = rangeContextOK and high[2] >= rangeResistance - rangeContextZone and close[2] <= rangeResistance + rangeContextZone
+nearRangeResistance3 = rangeContextOK and high[3] >= rangeResistance - rangeContextZone and close[3] <= rangeResistance + rangeContextZone
+nearRangeResistance4 = rangeContextOK and high[4] >= rangeResistance - rangeContextZone and close[4] <= rangeResistance + rangeContextZone
+
+nearBullFvg0 = bullFvgFresh and low <= bullFvgHigh and close >= bullFvgLow
+nearBullFvg1 = bullFvgFresh and low[1] <= bullFvgHigh and close[1] >= bullFvgLow
+nearBullFvg2 = bullFvgFresh and low[2] <= bullFvgHigh and close[2] >= bullFvgLow
+nearBullFvg3 = bullFvgFresh and low[3] <= bullFvgHigh and close[3] >= bullFvgLow
+nearBullFvg4 = bullFvgFresh and low[4] <= bullFvgHigh and close[4] >= bullFvgLow
+
+nearBearFvg0 = bearFvgFresh and high >= bearFvgLow and close <= bearFvgHigh
+nearBearFvg1 = bearFvgFresh and high[1] >= bearFvgLow and close[1] <= bearFvgHigh
+nearBearFvg2 = bearFvgFresh and high[2] >= bearFvgLow and close[2] <= bearFvgHigh
+nearBearFvg3 = bearFvgFresh and high[3] >= bearFvgLow and close[3] <= bearFvgHigh
+nearBearFvg4 = bearFvgFresh and high[4] >= bearFvgLow and close[4] <= bearFvgHigh
+
+nearBullOb0 = bullObFresh and low <= bullObHigh and close >= bullObLow
+nearBullOb1 = bullObFresh and low[1] <= bullObHigh and close[1] >= bullObLow
+nearBullOb2 = bullObFresh and low[2] <= bullObHigh and close[2] >= bullObLow
+nearBullOb3 = bullObFresh and low[3] <= bullObHigh and close[3] >= bullObLow
+nearBullOb4 = bullObFresh and low[4] <= bullObHigh and close[4] >= bullObLow
+
+nearBearOb0 = bearObFresh and high >= bearObLow and close <= bearObHigh
+nearBearOb1 = bearObFresh and high[1] >= bearObLow and close[1] <= bearObHigh
+nearBearOb2 = bearObFresh and high[2] >= bearObLow and close[2] <= bearObHigh
+nearBearOb3 = bearObFresh and high[3] >= bearObLow and close[3] <= bearObHigh
+nearBearOb4 = bearObFresh and high[4] >= bearObLow and close[4] <= bearObHigh
+
+nearSupport0 = nearPivotSupport0 or nearRangeSupport0 or nearBullFvg0 or nearBullOb0
+nearSupport1 = nearPivotSupport1 or nearRangeSupport1 or nearBullFvg1 or nearBullOb1
+nearSupport2 = nearPivotSupport2 or nearRangeSupport2 or nearBullFvg2 or nearBullOb2
+nearSupport3 = nearPivotSupport3 or nearRangeSupport3 or nearBullFvg3 or nearBullOb3
+nearSupport4 = nearPivotSupport4 or nearRangeSupport4 or nearBullFvg4 or nearBullOb4
+
+nearResistance0 = nearPivotResistance0 or nearRangeResistance0 or nearBearFvg0 or nearBearOb0
+nearResistance1 = nearPivotResistance1 or nearRangeResistance1 or nearBearFvg1 or nearBearOb1
+nearResistance2 = nearPivotResistance2 or nearRangeResistance2 or nearBearFvg2 or nearBearOb2
+nearResistance3 = nearPivotResistance3 or nearRangeResistance3 or nearBearFvg3 or nearBearOb3
+nearResistance4 = nearPivotResistance4 or nearRangeResistance4 or nearBearFvg4 or nearBearOb4
+
+lowerReject0 = nearSupport0 and range0 > 0 and lowerWick0 / range0 >= clusterWickPct ? 1 : 0
+lowerReject1 = nearSupport1 and range1 > 0 and lowerWick1 / range1 >= clusterWickPct ? 1 : 0
+lowerReject2 = nearSupport2 and range2 > 0 and lowerWick2 / range2 >= clusterWickPct ? 1 : 0
+lowerReject3 = nearSupport3 and range3 > 0 and lowerWick3 / range3 >= clusterWickPct ? 1 : 0
+lowerReject4 = nearSupport4 and range4 > 0 and lowerWick4 / range4 >= clusterWickPct ? 1 : 0
+
+upperReject0 = nearResistance0 and range0 > 0 and upperWick0 / range0 >= clusterWickPct ? 1 : 0
+upperReject1 = nearResistance1 and range1 > 0 and upperWick1 / range1 >= clusterWickPct ? 1 : 0
+upperReject2 = nearResistance2 and range2 > 0 and upperWick2 / range2 >= clusterWickPct ? 1 : 0
+upperReject3 = nearResistance3 and range3 > 0 and upperWick3 / range3 >= clusterWickPct ? 1 : 0
+upperReject4 = nearResistance4 and range4 > 0 and upperWick4 / range4 >= clusterWickPct ? 1 : 0
+
+lowerRejectCount = clusterLookbackBars == 3 ? lowerReject0 + lowerReject1 + lowerReject2 : clusterLookbackBars == 4 ? lowerReject0 + lowerReject1 + lowerReject2 + lowerReject3 : lowerReject0 + lowerReject1 + lowerReject2 + lowerReject3 + lowerReject4
+upperRejectCount = clusterLookbackBars == 3 ? upperReject0 + upperReject1 + upperReject2 : clusterLookbackBars == 4 ? upperReject0 + upperReject1 + upperReject2 + upperReject3 : upperReject0 + upperReject1 + upperReject2 + upperReject3 + upperReject4
+
+effectiveClusterMinRejectBars = math.min(clusterMinRejectBars, clusterLookbackBars)
+
+clusterLowestLow = ta.lowest(low, clusterLookbackBars)
+clusterHighestHigh = ta.highest(high, clusterLookbackBars)
+
+touchPivotSupportCluster = supportFresh and supportMultiTestOK and clusterLowestLow <= support + zoneSize and close >= support - zoneSize
+touchPivotResistanceCluster = resistanceFresh and resistanceMultiTestOK and clusterHighestHigh >= resistance - zoneSize and close <= resistance + zoneSize
+touchRangeSupportCluster = rangeContextOK and clusterLowestLow <= rangeSupport + rangeContextZone and close >= rangeSupport - rangeContextZone
+touchRangeResistanceCluster = rangeContextOK and clusterHighestHigh >= rangeResistance - rangeContextZone and close <= rangeResistance + rangeContextZone
+touchBullFvgCluster = bullFvgFresh and clusterLowestLow <= bullFvgHigh and close >= bullFvgLow
+touchBearFvgCluster = bearFvgFresh and clusterHighestHigh >= bearFvgLow and close <= bearFvgHigh
+touchBullObCluster = bullObFresh and clusterLowestLow <= bullObHigh and close >= bullObLow
+touchBearObCluster = bearObFresh and clusterHighestHigh >= bearObLow and close <= bearObHigh
+
+touchSupportCluster = touchPivotSupportCluster or touchRangeSupportCluster or touchBullFvgCluster or touchBullObCluster
+touchResistanceCluster = touchPivotResistanceCluster or touchRangeResistanceCluster or touchBearFvgCluster or touchBearObCluster
+
+clusterSignalRange = high - low
+clusterSignalBody = math.abs(close - open)
+clusterSignalBodyOK = not useClusterQualityFilters or (clusterSignalRange > 0 and clusterSignalBody / clusterSignalRange >= clusterMinSignalBodyPct)
+
+clusterBullCloseExtremeOK = not useClusterQualityFilters or clusterSignalRange <= 0 or (close - low) / clusterSignalRange >= (1.0 - clusterCloseExtremePct)
+clusterBearCloseExtremeOK = not useClusterQualityFilters or clusterSignalRange <= 0 or (high - close) / clusterSignalRange >= (1.0 - clusterCloseExtremePct)
+
+clusterBullCloseBeyondPrevOK = not useClusterQualityFilters or not clusterRequireCloseBeyondPrevBody or close > math.max(open[1], close[1])
+clusterBearCloseBeyondPrevOK = not useClusterQualityFilters or not clusterRequireCloseBeyondPrevBody or close < math.min(open[1], close[1])
+
+clusterBullReclaimOK = not useClusterQualityFilters or not clusterRequireReclaimSR or (touchPivotSupportCluster and close >= support + zoneSize * clusterReclaimZonePct) or (touchRangeSupportCluster and close >= rangeSupport + rangeContextZone * clusterReclaimZonePct) or (touchBullFvgCluster and close >= bullFvgLow) or (touchBullObCluster and close >= bullObLow)
+clusterBearReclaimOK = not useClusterQualityFilters or not clusterRequireReclaimSR or (touchPivotResistanceCluster and close <= resistance - zoneSize * clusterReclaimZonePct) or (touchRangeResistanceCluster and close <= rangeResistance - rangeContextZone * clusterReclaimZonePct) or (touchBearFvgCluster and close <= bearFvgHigh) or (touchBearObCluster and close <= bearObHigh)
+
+clusterRangeNow = clusterHighestHigh - clusterLowestLow
+clusterRangeOK = not useClusterQualityFilters or not clusterUseMaxRangeFilter or clusterRangeNow <= atr * clusterMaxRangeATR
+
+clusterBearCrash = close[1] < open[1] and close[2] < open[2] and close[3] < open[3]
+clusterBullCrash = close[1] > open[1] and close[2] > open[2] and close[3] > open[3]
+clusterBullAntiCrashOK = not useClusterQualityFilters or not clusterUseAntiCrash or not clusterBearCrash
+clusterBearAntiCrashOK = not useClusterQualityFilters or not clusterUseAntiCrash or not clusterBullCrash
+
+clusterBullQualityScore =
+     (clusterSignalBodyOK ? 1 : 0) +
+     (clusterBullCloseExtremeOK ? 1 : 0) +
+     (clusterBullCloseBeyondPrevOK ? 1 : 0) +
+     (clusterBullReclaimOK ? 1 : 0) +
+     (clusterRangeOK ? 1 : 0) +
+     (clusterBullAntiCrashOK ? 1 : 0)
+
+clusterBearQualityScore =
+     (clusterSignalBodyOK ? 1 : 0) +
+     (clusterBearCloseExtremeOK ? 1 : 0) +
+     (clusterBearCloseBeyondPrevOK ? 1 : 0) +
+     (clusterBearReclaimOK ? 1 : 0) +
+     (clusterRangeOK ? 1 : 0) +
+     (clusterBearAntiCrashOK ? 1 : 0)
+
+clusterBullQualityOK = not useClusterQualityFilters or clusterBullQualityScore >= clusterMinQualityScore
+clusterBearQualityOK = not useClusterQualityFilters or clusterBearQualityScore >= clusterMinQualityScore
+
+clusterBullRawPattern = lowerRejectCount >= effectiveClusterMinRejectBars and close > open and close > close[1]
+clusterBearRawPattern = upperRejectCount >= effectiveClusterMinRejectBars and close < open and close < close[1]
+
+clusterBullPattern = clusterBullRawPattern and clusterBullQualityOK
+clusterBearPattern = clusterBearRawPattern and clusterBearQualityOK
+
+contextPivotRangeEnabled = contextMode == "Pivot/Range only" or contextMode == "All"
+contextFVGEnabled = contextMode == "FVG only" or contextMode == "FVG + OB" or contextMode == "All"
+contextOBEnabled = contextMode == "OB only" or contextMode == "FVG + OB" or contextMode == "All"
+
+clusterBullScoreBonus = (clusterBullQualityScore >= 6 ? 2 : clusterBullQualityScore >= 5 ? 1 : 0) + (bullLiquiditySweep ? 2 : 0) + (bullDisplacement ? 1 : 0) + (ltfBullScoreBonus ? 1 : 0) + (htfBull ? 1 : 0) + (structureBias == 1 and bullStructureRecent ? 1 : 0)
+clusterBearScoreBonus = (clusterBearQualityScore >= 6 ? 2 : clusterBearQualityScore >= 5 ? 1 : 0) + (bearLiquiditySweep ? 2 : 0) + (bearDisplacement ? 1 : 0) + (ltfBearScoreBonus ? 1 : 0) + (htfBear ? 1 : 0) + (structureBias == -1 and bearStructureRecent ? 1 : 0)
+
+bullPivotRangeSetupScore = (touchPivotSupportCluster ? 1 : 0) + (touchRangeSupportCluster ? 1 : 0) + clusterBullScoreBonus
+bearPivotRangeSetupScore = (touchPivotResistanceCluster ? 1 : 0) + (touchRangeResistanceCluster ? 1 : 0) + clusterBearScoreBonus
+bullFVGSetupScore = (touchBullFvgCluster ? 2 : 0) + clusterBullScoreBonus
+bearFVGSetupScore = (touchBearFvgCluster ? 2 : 0) + clusterBearScoreBonus
+bullOBSetupScore = (touchBullObCluster ? 2 : 0) + clusterBullScoreBonus
+bearOBSetupScore = (touchBearObCluster ? 2 : 0) + clusterBearScoreBonus
+
+clusterBullSetupScore = math.max(math.max(bullPivotRangeSetupScore, bullFVGSetupScore), bullOBSetupScore)
+clusterBearSetupScore = math.max(math.max(bearPivotRangeSetupScore, bearFVGSetupScore), bearOBSetupScore)
+
+clusterBullContextOK = (contextPivotRangeEnabled and (touchPivotSupportCluster or touchRangeSupportCluster) and (not useSetupScoreFilter or bullPivotRangeSetupScore >= minPivotRangeScore)) or (contextFVGEnabled and touchBullFvgCluster and (not useSetupScoreFilter or bullFVGSetupScore >= minFVGScore)) or (contextOBEnabled and touchBullObCluster and (not useSetupScoreFilter or bullOBSetupScore >= minOBScore))
+clusterBearContextOK = (contextPivotRangeEnabled and (touchPivotResistanceCluster or touchRangeResistanceCluster) and (not useSetupScoreFilter or bearPivotRangeSetupScore >= minPivotRangeScore)) or (contextFVGEnabled and touchBearFvgCluster and (not useSetupScoreFilter or bearFVGSetupScore >= minFVGScore)) or (contextOBEnabled and touchBearObCluster and (not useSetupScoreFilter or bearOBSetupScore >= minOBScore))
+
+clusterBullSignalNow = useRejectionClusterPattern and clusterBullPattern and clusterBullContextOK and (not useSweepFilter or bullLiquiditySweep) and (not useDisplacementFilter or bullDisplacement)
+clusterBearSignalNow = useRejectionClusterPattern and clusterBearPattern and clusterBearContextOK and (not useSweepFilter or bearLiquiditySweep) and (not useDisplacementFilter or bearDisplacement)
+
+bullEngulfingPattern = close > open and close[1] < open[1] and open <= close[1] and close >= open[1]
+bearEngulfingPattern = close < open and close[1] > open[1] and open >= close[1] and close <= open[1]
+bullEngulfingCloseOK = clusterSignalRange <= 0 or (close - low) / clusterSignalRange >= (1.0 - clusterCloseExtremePct)
+bearEngulfingCloseOK = clusterSignalRange <= 0 or (high - close) / clusterSignalRange >= (1.0 - clusterCloseExtremePct)
+bullEngulfingSetupScore = clusterBullContextOK ? clusterBullSetupScore + (bullEngulfingPattern ? 2 : 0) + (bullEngulfingCloseOK ? 1 : 0) : 0
+bearEngulfingSetupScore = clusterBearContextOK ? clusterBearSetupScore + (bearEngulfingPattern ? 2 : 0) + (bearEngulfingCloseOK ? 1 : 0) : 0
+bullEngulfingScoreOK = not useSetupScoreFilter or bullEngulfingSetupScore >= minEngulfingScore
+bearEngulfingScoreOK = not useSetupScoreFilter or bearEngulfingSetupScore >= minEngulfingScore
+engulfingBullSignalNow = useEngulfingPattern and bullEngulfingPattern and bullEngulfingCloseOK and clusterBullContextOK and (not useSweepFilter or bullLiquiditySweep) and (not useDisplacementFilter or bullDisplacement) and bullEngulfingScoreOK
+engulfingBearSignalNow = useEngulfingPattern and bearEngulfingPattern and bearEngulfingCloseOK and clusterBearContextOK and (not useSweepFilter or bearLiquiditySweep) and (not useDisplacementFilter or bearDisplacement) and bearEngulfingScoreOK
+
+clusterBullRawSignalNow = useRejectionClusterPattern and clusterBullRawPattern and touchSupportCluster
+clusterBearRawSignalNow = useRejectionClusterPattern and clusterBearRawPattern and touchResistanceCluster
+clusterBullBlockedByQuality = showClusterDebugMarks and clusterBullRawSignalNow and not clusterBullSignalNow
+clusterBearBlockedByQuality = showClusterDebugMarks and clusterBearRawSignalNow and not clusterBearSignalNow
+
+plotshape(showClusterDebugMarks and clusterBullSignalNow, title="Cluster BUY passed", text="C+", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.white, size=size.tiny)
+plotshape(showClusterDebugMarks and clusterBearSignalNow, title="Cluster SELL passed", text="C+", style=shape.triangledown, location=location.abovebar, color=color.new(color.purple, 0), textcolor=color.white, size=size.tiny)
+plotshape(clusterBullBlockedByQuality, title="Cluster BUY blocked", text="C?", style=shape.xcross, location=location.belowbar, color=color.new(color.orange, 0), textcolor=color.white, size=size.tiny)
+plotshape(clusterBearBlockedByQuality, title="Cluster SELL blocked", text="C?", style=shape.xcross, location=location.abovebar, color=color.new(color.orange, 0), textcolor=color.white, size=size.tiny)
+
+// ============================================================================
+// 6. SETUP SNAPSHOT + OPTIONAL CONFIRMATION
+// ============================================================================
+
+bullSignalNow = threeBarBullSignalNow or clusterBullSignalNow or engulfingBullSignalNow
+bearSignalNow = threeBarBearSignalNow or clusterBearSignalNow or engulfingBearSignalNow
+
+threeBarBullLowForSL = lowestLow3
+threeBarBearHighForSL = highestHigh3
+clusterBullLowForSL = clusterLowestLow
+clusterBearHighForSL = clusterHighestHigh
+engulfingBullLowForSL = ta.lowest(low, 2)
+engulfingBearHighForSL = ta.highest(high, 2)
+
+preferThreeBarWhenSameSide = patternPriority == "Uu tien Three Bar"
+preferClusterWhenSameSide = patternPriority == "Uu tien Cluster"
+selectedBullIsCluster = clusterBullSignalNow and (not threeBarBullSignalNow or preferClusterWhenSameSide) and (not engulfingBullSignalNow or preferClusterWhenSameSide)
+selectedBearIsCluster = clusterBearSignalNow and (not threeBarBearSignalNow or preferClusterWhenSameSide) and (not engulfingBearSignalNow or preferClusterWhenSameSide)
+selectedBullIsThreeBar = threeBarBullSignalNow and not selectedBullIsCluster and (not engulfingBullSignalNow or preferThreeBarWhenSameSide)
+selectedBearIsThreeBar = threeBarBearSignalNow and not selectedBearIsCluster and (not engulfingBearSignalNow or preferThreeBarWhenSameSide)
+selectedBullIsEngulfing = engulfingBullSignalNow and not selectedBullIsCluster and not selectedBullIsThreeBar
+selectedBearIsEngulfing = engulfingBearSignalNow and not selectedBearIsCluster and not selectedBearIsThreeBar
+
+currentBullCode = selectedBullIsCluster ? 5 : selectedBullIsEngulfing ? 7 : selectedBullIsThreeBar ? 3 : 0
+currentBearCode = selectedBearIsCluster ? -5 : selectedBearIsEngulfing ? -7 : selectedBearIsThreeBar ? -3 : 0
+currentBullLowForSL = selectedBullIsCluster ? clusterBullLowForSL : selectedBullIsEngulfing ? engulfingBullLowForSL : threeBarBullLowForSL
+currentBearHighForSL = selectedBearIsCluster ? clusterBearHighForSL : selectedBearIsEngulfing ? engulfingBearHighForSL : threeBarBearHighForSL
+currentBullUsesContext = selectedBullIsCluster or selectedBullIsEngulfing
+currentBearUsesContext = selectedBearIsCluster or selectedBearIsEngulfing
+currentBullSupport = currentBullUsesContext and touchPivotSupportCluster ? support : currentBullUsesContext and touchRangeSupportCluster ? rangeSupport : currentBullUsesContext and touchBullFvgCluster ? bullFvgLow : currentBullUsesContext and touchBullObCluster ? bullObLow : support
+currentBearResistance = currentBearUsesContext and touchPivotResistanceCluster ? resistance : currentBearUsesContext and touchRangeResistanceCluster ? rangeResistance : currentBearUsesContext and touchBearFvgCluster ? bearFvgHigh : currentBearUsesContext and touchBearObCluster ? bearObHigh : resistance
+currentBullSetupScore = selectedBullIsCluster ? clusterBullSetupScore : selectedBullIsEngulfing ? bullEngulfingSetupScore : selectedBullIsThreeBar ? threeBarBullSetupScore : 0
+currentBearSetupScore = selectedBearIsCluster ? clusterBearSetupScore : selectedBearIsEngulfing ? bearEngulfingSetupScore : selectedBearIsThreeBar ? threeBarBearSetupScore : 0
+
+var int lastBullSetupBar = na
+var int lastBearSetupBar = na
+var int lastBullCode = na
+var int lastBearCode = na
+var float lastBullHigh = na
+var float lastBearLow = na
+var float lastBullBodyHigh = na
+var float lastBearBodyLow = na
+var float lastBullLowForSL = na
+var float lastBearHighForSL = na
+var float lastBullSupport = na
+var float lastBearResistance = na
+var int lastBullSetupScore = na
+var int lastBearSetupScore = na
+
+if bullSignalNow
+    lastBullSetupBar := bar_index
+    lastBullCode := currentBullCode
+    lastBullHigh := high
+    lastBullBodyHigh := math.max(open, close)
+    lastBullLowForSL := currentBullLowForSL
+    lastBullSupport := currentBullSupport
+    lastBullSetupScore := currentBullSetupScore
+
+if bearSignalNow
+    lastBearSetupBar := bar_index
+    lastBearCode := currentBearCode
+    lastBearLow := low
+    lastBearBodyLow := math.min(open, close)
+    lastBearHighForSL := currentBearHighForSL
+    lastBearResistance := currentBearResistance
+    lastBearSetupScore := currentBearSetupScore
+
+needsExtraConfirm = entryMode == "Can them nen xac nhan"
+
+barsSinceBullSetup = not na(lastBullSetupBar) ? bar_index - lastBullSetupBar : na
+barsSinceBearSetup = not na(lastBearSetupBar) ? bar_index - lastBearSetupBar : na
+
+bullSetupRecent = not na(barsSinceBullSetup) and barsSinceBullSetup >= 1 and barsSinceBullSetup <= confirmWithinBars
+bearSetupRecent = not na(barsSinceBearSetup) and barsSinceBearSetup >= 1 and barsSinceBearSetup <= confirmWithinBars
+
+bullBreakLevel = confirmMode == "Close vuot High/Low" ? lastBullHigh : lastBullBodyHigh
+bearBreakLevel = confirmMode == "Close vuot High/Low" ? lastBearLow : lastBearBodyLow
+
+bullConfirm = needsExtraConfirm ? bullSetupRecent and not na(bullBreakLevel) and close > bullBreakLevel : bullSignalNow
+bearConfirm = needsExtraConfirm ? bearSetupRecent and not na(bearBreakLevel) and close < bearBreakLevel : bearSignalNow
+
+signalBullCode = needsExtraConfirm ? lastBullCode : currentBullCode
+signalBearCode = needsExtraConfirm ? lastBearCode : currentBearCode
+signalBullSetupBar = needsExtraConfirm ? lastBullSetupBar : bar_index
+signalBearSetupBar = needsExtraConfirm ? lastBearSetupBar : bar_index
+signalBullLowForSL = needsExtraConfirm ? lastBullLowForSL : currentBullLowForSL
+signalBearHighForSL = needsExtraConfirm ? lastBearHighForSL : currentBearHighForSL
+signalBullSupport = needsExtraConfirm ? lastBullSupport : currentBullSupport
+signalBearResistance = needsExtraConfirm ? lastBearResistance : currentBearResistance
+signalBullSetupScore = needsExtraConfirm ? lastBullSetupScore : currentBullSetupScore
+signalBearSetupScore = needsExtraConfirm ? lastBearSetupScore : currentBearSetupScore
+
+// ============================================================================
+// 7. ENTRY, FILTERS, EXECUTION
+// ============================================================================
+
+buyEntry = close
+sellEntry = close
+slBuffer = atr * slBufferATR
+
+buySL = signalBullLowForSL - slBuffer
+sellSL = signalBearHighForSL + slBuffer
+buyRisk = buyEntry - buySL
+sellRisk = sellSL - sellEntry
+
+buyTP1 = buyEntry + buyRisk * rr1
+buyTP2 = buyEntry + buyRisk * effectiveRr2
+sellTP1 = sellEntry - sellRisk * rr1
+sellTP2 = sellEntry - sellRisk * effectiveRr2
+buyTPStrategy = strategyTPChoice == "TP1" ? buyTP1 : buyTP2
+sellTPStrategy = strategyTPChoice == "TP1" ? sellTP1 : sellTP2
+
+buyRoomToResistance = resistanceFresh ? resistance - buyEntry : rangeContextOK ? rangeResistance - buyEntry : na
+sellRoomToSupport = supportFresh ? sellEntry - support : rangeContextOK ? sellEntry - rangeSupport : na
+
+buyRoomOK = not useRoomFilter or (not na(buyRoomToResistance) and buyRoomToResistance > 0 and buyRoomToResistance >= buyRisk * minRoomR)
+sellRoomOK = not useRoomFilter or (not na(sellRoomToSupport) and sellRoomToSupport > 0 and sellRoomToSupport >= sellRisk * minRoomR)
+
+recentHigh = ta.highest(high, antiChaseLookback)
+recentLow = ta.lowest(low, antiChaseLookback)
+recentRange = recentHigh - recentLow
+buyAntiChaseOK = not useAntiChaseFilter or recentRange <= 0 or close <= recentHigh - recentRange * antiChaseExtremePct
+sellAntiChaseOK = not useAntiChaseFilter or recentRange <= 0 or close >= recentLow + recentRange * antiChaseExtremePct
+
+directionBuyOK = tradeDirection != "Short only"
+directionSellOK = tradeDirection != "Long only"
+buySetupScoreOK = not useSetupScoreFilter or (not na(signalBullSetupScore) and signalBullSetupScore >= minBuySetupScore)
+sellSetupScoreOK = not useSetupScoreFilter or (not na(signalBearSetupScore) and signalBearSetupScore >= minSellSetupScore)
+buyRiskOK = buyRisk > syminfo.mintick * minRiskTicks and (not useMaxRiskATRFilter or buyRisk <= atr * maxRiskATR)
+sellRiskOK = sellRisk > syminfo.mintick * minRiskTicks and (not useMaxRiskATRFilter or sellRisk <= atr * maxRiskATR)
+
+validBuyRaw = directionBuyOK and barCloseOK and bullConfirm and buyTrendOK and ltfBuyTrendOK and structureBuyOK and buySetupScoreOK and buyRoomOK and buyAntiChaseOK and buyRiskOK
+validSellRaw = directionSellOK and barCloseOK and bearConfirm and sellTrendOK and ltfSellTrendOK and structureSellOK and sellSetupScoreOK and sellRoomOK and sellAntiChaseOK and sellRiskOK
+
+bothSignals = validBuyRaw and validSellRaw
+
+preferBuyOnBoth = patternPriority == "Uu tien Three Bar" ? signalBullCode == 3 and signalBearCode != -3 : patternPriority == "Uu tien Cluster" ? signalBullCode == 5 and signalBearCode != -5 : false
+preferSellOnBoth = patternPriority == "Uu tien Three Bar" ? signalBearCode == -3 and signalBullCode != 3 : patternPriority == "Uu tien Cluster" ? signalBearCode == -5 and signalBullCode != 5 : false
+
+validBuy = validBuyRaw and (not bothSignals or preferBuyOnBoth)
+validSell = validSellRaw and (not bothSignals or preferSellOnBoth)
+
+var int tradedBullSetupBar = na
+var int tradedBearSetupBar = na
+
+alreadyTradedBullSetup = not na(tradedBullSetupBar) and signalBullSetupBar == tradedBullSetupBar
+alreadyTradedBearSetup = not na(tradedBearSetupBar) and signalBearSetupBar == tradedBearSetupBar
+
+tradeBuy = validBuy and not alreadyTradedBullSetup and strategy.position_size <= 0 and sessionOK
+tradeSell = validSell and not alreadyTradedBearSetup and strategy.position_size >= 0 and sessionOK
+
+var float activeLongSL = na
+var float activeLongTP = na
+var float activeShortSL = na
+var float activeShortTP = na
+
+if tradeBuy
+    activeLongSL := buySL
+    activeLongTP := buyTPStrategy
+    activeShortSL := na
+    activeShortTP := na
+    tradedBullSetupBar := signalBullSetupBar
+    strategy.entry("LONG", strategy.long, comment="B")
+
+if tradeSell
+    activeShortSL := sellSL
+    activeShortTP := sellTPStrategy
+    activeLongSL := na
+    activeLongTP := na
+    tradedBearSetupBar := signalBearSetupBar
+    strategy.entry("SHORT", strategy.short, comment="S")
+
+if not na(activeLongSL) and not na(activeLongTP)
+    strategy.exit("XL", from_entry="LONG", stop=activeLongSL, limit=activeLongTP)
+
+if not na(activeShortSL) and not na(activeShortTP)
+    strategy.exit("XS", from_entry="SHORT", stop=activeShortSL, limit=activeShortTP)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    activeLongSL := na
+    activeLongTP := na
+    activeShortSL := na
+    activeShortTP := na
+
+// ============================================================================
+// 8. VISUALS + ALERTS
+// ============================================================================
+
+if showLabels and tradeBuy
+    _txt = labelText(true, signalBullCode, buyEntry, buySL, buyTP1, buyTP2)
+    _tip = "BUY SETUP\n" + "-------------------------\n" + "Pattern: " + patternName(signalBullCode) + "\nEntry: " + fmt(buyEntry) + "\nStop Loss: " + fmt(buySL) + "\nTP1 RR " + str.tostring(rr1, "#.##") + ": " + fmt(buyTP1) + "\nTP2 RR " + str.tostring(effectiveRr2, "#.##") + ": " + fmt(buyTP2) + "\nStrategy TP: " + strategyTPChoice + "\nRisk: " + fmt(buyRisk) + "\n\nReason:\nPattern confirm: " + boolText(bullConfirm) + "\nHTF filter: " + boolText(buyTrendOK) + "\nSession: " + boolText(sessionOK) + "\nRoom filter: " + boolText(buyRoomOK) + " | Room to Resistance: " + fmt(buyRoomToResistance) + "\nAnti Chase: " + boolText(buyAntiChaseOK) + "\nSupport: " + fmt(signalBullSupport)
+    label.new(bar_index, low, _txt, style=label.style_label_up, color=color.new(color.green, 0), textcolor=color.white, size=labelSize(), tooltip=_tip)
+
+if showLabels and tradeSell
+    _txt = labelText(false, signalBearCode, sellEntry, sellSL, sellTP1, sellTP2)
+    _tip = "SELL SETUP\n" + "-------------------------\n" + "Pattern: " + patternName(signalBearCode) + "\nEntry: " + fmt(sellEntry) + "\nStop Loss: " + fmt(sellSL) + "\nTP1 RR " + str.tostring(rr1, "#.##") + ": " + fmt(sellTP1) + "\nTP2 RR " + str.tostring(effectiveRr2, "#.##") + ": " + fmt(sellTP2) + "\nStrategy TP: " + strategyTPChoice + "\nRisk: " + fmt(sellRisk) + "\n\nReason:\nPattern confirm: " + boolText(bearConfirm) + "\nHTF filter: " + boolText(sellTrendOK) + "\nSession: " + boolText(sessionOK) + "\nRoom filter: " + boolText(sellRoomOK) + " | Room to Support: " + fmt(sellRoomToSupport) + "\nAnti Chase: " + boolText(sellAntiChaseOK) + "\nResistance: " + fmt(signalBearResistance)
+    label.new(bar_index, high, _txt, style=label.style_label_down, color=color.new(color.purple, 0), textcolor=color.white, size=labelSize(), tooltip=_tip)
+
+if showLines and tradeBuy
+    drawTradeLevel(buyEntry, "Entry", color.new(color.blue, 0), line.style_solid)
+    drawTradeLevel(buySL, "SL", color.new(color.orange, 0), line.style_dashed)
+    drawTradeLevel(buyTP1, "TP1", color.new(color.lime, 0), line.style_dashed)
+    drawTradeLevel(buyTP2, "TP2", color.new(color.lime, 0), line.style_dashed)
+
+if showLines and tradeSell
+    drawTradeLevel(sellEntry, "Entry", color.new(color.blue, 0), line.style_solid)
+    drawTradeLevel(sellSL, "SL", color.new(color.orange, 0), line.style_dashed)
+    drawTradeLevel(sellTP1, "TP1", color.new(color.lime, 0), line.style_dashed)
+    drawTradeLevel(sellTP2, "TP2", color.new(color.lime, 0), line.style_dashed)
+
+alertcondition(tradeBuy, title="BUY Three Bar / Cluster", message="BUY reversal test signal")
+alertcondition(tradeSell, title="SELL Three Bar / Cluster", message="SELL reversal test signal")
