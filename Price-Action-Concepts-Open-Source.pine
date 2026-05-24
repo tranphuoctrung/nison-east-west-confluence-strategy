@@ -779,6 +779,9 @@ bull_bos_alert   = false
 bear_choch_alert = false 
 bear_bos_alert   = false 
 
+bull_bos_hh_alert = false
+bear_bos_ll_alert = false
+
 bull_ichoch_alert = false 
 bull_ibos_alert   = false 
 
@@ -1003,6 +1006,7 @@ if ta.crossover(close, top_y) and top_cross
         bull_choch_alert := true
     else 
         bull_bos_alert := true
+        bull_bos_hh_alert := txt_top == 'HH'
 
     txt = choch ? 'CHoCH' : 'BOS'
     if choch
@@ -1064,6 +1068,7 @@ if ta.crossunder(close, btm_y) and btm_cross
         bear_choch_alert := true
     else 
         bear_bos_alert := true
+        bear_bos_ll_alert := txt_btm == 'LL'
         
 
     txt = choch ? 'CHoCH' : 'BOS'
@@ -1873,6 +1878,10 @@ grpES = "🎯 Entry - SELL rule"
 maxBarsHHtoChoCH   = input.int (15,    "Max nen tu HH/LH -> CHoCH",              minval = 1, maxval = 200, group = grpES)
 maxBarsHHtoEntry   = input.int (15,    "Max nen tu HH/LH -> S",                  minval = 1, maxval = 200, group = grpES)
 
+// --- BOS reversal rule ---
+grpER = "Entry - BOS reversal"
+showBosReversal    = input.bool(true, "Bat tin hieu dao chieu sau BOS", group = grpER)
+
 // --- Chung (SL/label) ---
 entrySLbufATR      = input.float(0.3,  "SL buffer ATR (duoi nen xanh / tren nen do)", minval = 0.0, step = 0.05, group = grpE)
 confirmBreakMode   = input.string("Vuot 80%", "Che do nen xac nhan", options = ["Vuot 50%", "Vuot 80%", "Vuot than", "Vuot dinh/day"], group = grpE)
@@ -1981,4 +1990,34 @@ if showEntries and top and (txt_top == 'HH' or txt_top == 'LH')
             label.new(_hhBar + _entryOffsetS, high[_entryBackS], "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
 
 alertcondition(_sellSig, "Entry SELL", "PAC Entry: SELL signal")
+
+//-----------------------------------------------------------------------------
+// BOS REVERSAL RULE
+//-----------------------------------------------------------------------------
+_bullBosPrev = bull_bos_hh_alert[1]
+_bearBosPrev = bear_bos_ll_alert[1]
+_prevBosBodyLow = math.min(open[1], close[1])
+_prevBosBodyHigh = math.max(open[1], close[1])
+
+_bosRevSellSig = showEntries and showBosReversal and _bullBosPrev and close < open and close < _prevBosBodyLow
+_bosRevBuySig = showEntries and showBosReversal and _bearBosPrev and close > open and close > _prevBosBodyHigh
+
+if _bosRevBuySig
+    _eEntryBRL = close
+    _eSLBRL = low[1] - atrE * entrySLbufATR
+    _eRiskBRL = _eEntryBRL - _eSLBRL
+    if _eRiskBRL > 0
+        _tip = "BUY - BOS reversal\n-----------------\nEntry: " + f_px(_eEntryBRL) + "\nSL:    " + f_px(_eSLBRL) + "  (duoi day moi tao, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBRL) + "\n-----------------\nBearish BOS pha LL gan nhat o nen truoc\nNen xac nhan xanh dong tren than nen BOS"
+        label.new(bar_index, low, "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+
+if _bosRevSellSig
+    _eEntryBRS = close
+    _eSLBRS = high[1] + atrE * entrySLbufATR
+    _eRiskBRS = _eSLBRS - _eEntryBRS
+    if _eRiskBRS > 0
+        _tip = "SELL - BOS reversal\n-----------------\nEntry: " + f_px(_eEntryBRS) + "\nSL:    " + f_px(_eSLBRS) + "  (tren dinh moi tao, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBRS) + "\n-----------------\nBullish BOS pha HH gan nhat o nen truoc\nNen xac nhan do dong duoi than nen BOS"
+        label.new(bar_index, high, "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+
+alertcondition(_bosRevBuySig, "Entry BUY - BOS Reversal", "PAC Entry: BUY BOS reversal signal")
+alertcondition(_bosRevSellSig, "Entry SELL - BOS Reversal", "PAC Entry: SELL BOS reversal signal")
 //-----------------------------------------------------------------------------}
