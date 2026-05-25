@@ -2027,7 +2027,7 @@ if _buyPendingCount > 0
                 _pChochOffset = array.get(buy_p_choch_offset, _idx)
                 _pEntryOffset = array.get(buy_p_entry_offset, _idx)
                 _pBarsChoCHtoBuy = _pEntryOffset - _pChochOffset
-                _reason = "LY DO BUY:\n" + _pSrcType + " label @ " + f_px(_pSrcPrice) + "\nCHoCH tang sau " + _pSrcType + ": " + str.tostring(_pChochOffset) + " nen\nPullback: YES\nKhong co LH giua " + _pSrcType + " va nen xac nhan\nNen xanh xac nhan sau CHoCH: " + str.tostring(_pBarsChoCHtoBuy) + " nen\n" + _pSrcType + " -> B: " + str.tostring(_pEntryOffset) + "/" + str.tostring(maxBarsLLtoEntry) + " nen"
+                _reason = "LY DO BUY:\n" + _pSrcType + " label @ " + f_px(_pSrcPrice) + "\nCHoCH tang sau " + _pSrcType + ": " + str.tostring(_pChochOffset) + " nen\nPullback: YES - co rau nen do duoi CHoCH\nKhong co LH giua " + _pSrcType + " va nen xac nhan\nNen xanh xac nhan sau CHoCH: " + str.tostring(_pBarsChoCHtoBuy) + " nen\n" + _pSrcType + " -> B: " + str.tostring(_pEntryOffset) + "/" + str.tostring(maxBarsLLtoEntry) + " nen"
                 _tip = "BUY\n-----------------\nEntry: " + f_px(_pEntry) + "\nSL:    " + f_px(_pSL) + "  (duoi nen xanh, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_pRisk) + "\n-----------------\n" + _reason
                 label.new(_pEntryBar, array.get(buy_p_entry_low, _idx), "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
                 _buySig := true
@@ -2047,6 +2047,7 @@ if showEntries and btm and (txt_btm == 'LL' or txt_btm == 'HL')
     int _chochOffsetL = na
     int _entryOffsetL = na
     bool _seenRedL = false
+    bool _seenRedWickBelowChoCHL = false
     bool _invalidL = false
 
     for _off = 1 to maxBarsLLtoChoCH
@@ -2063,8 +2064,12 @@ if showEntries and btm and (txt_btm == 'LL' or txt_btm == 'HL')
                 else
                     if close[_barsBack] < open[_barsBack]
                         _seenRedL := true
+                        _chochBackL = bar_index - (_llBar + _chochOffsetL)
+                        _chochPriceL = itop_y[_chochBackL]
+                        if low[_barsBack] < _chochPriceL
+                            _seenRedWickBelowChoCHL := true
                     _buyLevelL = f_buy_confirm_level(_barsBack)
-                    if _seenRedL and close[_barsBack] > open[_barsBack] and close[_barsBack] > _buyLevelL
+                    if _seenRedL and _seenRedWickBelowChoCHL and close[_barsBack] > open[_barsBack] and close[_barsBack] > _buyLevelL
                         _entryOffsetL := _off
 
     if not na(_entryOffsetL)
@@ -2078,7 +2083,7 @@ if showEntries and btm and (txt_btm == 'LL' or txt_btm == 'HL')
                 if not f_has_swing_top_between(_llBar, _entryBarL, 'LH')
                     _buySig := true
                     _barsChoCHtoBuy = _entryOffsetL - _chochOffsetL
-                    _reason = "LY DO BUY:\n" + txt_btm + " label @ " + f_px(btm) + "\nCHoCH tang sau " + txt_btm + ": " + str.tostring(_chochOffsetL) + " nen\nPullback: YES\nKhong co LH giua " + txt_btm + " va nen xac nhan\nNen xanh xac nhan sau CHoCH: " + str.tostring(_barsChoCHtoBuy) + " nen\n" + txt_btm + " -> B: " + str.tostring(_entryOffsetL) + "/" + str.tostring(maxBarsLLtoEntry) + " nen"
+                    _reason = "LY DO BUY:\n" + txt_btm + " label @ " + f_px(btm) + "\nCHoCH tang sau " + txt_btm + ": " + str.tostring(_chochOffsetL) + " nen\nPullback: YES - co rau nen do duoi CHoCH\nKhong co LH giua " + txt_btm + " va nen xac nhan\nNen xanh xac nhan sau CHoCH: " + str.tostring(_barsChoCHtoBuy) + " nen\n" + txt_btm + " -> B: " + str.tostring(_entryOffsetL) + "/" + str.tostring(maxBarsLLtoEntry) + " nen"
                     _tip = "BUY\n-----------------\nEntry: " + f_px(_eEntryL) + "\nSL:    " + f_px(_eSLL) + "  (duoi nen xanh, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskL) + "\n-----------------\n" + _reason
                     label.new(_entryBarL, low[_entryBackL], "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
             else
@@ -2116,7 +2121,7 @@ if _sellPendingCount > 0
                 _pChochOffset = array.get(sell_p_choch_offset, _idx)
                 _pEntryOffset = array.get(sell_p_entry_offset, _idx)
                 _pBarsChoCHtoSell = _pEntryOffset - _pChochOffset
-                _reason = "LY DO SELL:\n" + _pSrcType + " label @ " + f_px(_pSrcPrice) + "\nCHoCH giam sau " + _pSrcType + ": " + str.tostring(_pChochOffset) + " nen\nPullback: YES\nKhong co HL giua " + _pSrcType + " va nen xac nhan\nNen do xac nhan sau CHoCH: " + str.tostring(_pBarsChoCHtoSell) + " nen\n" + _pSrcType + " -> S: " + str.tostring(_pEntryOffset) + "/" + str.tostring(maxBarsHHtoEntry) + " nen"
+                _reason = "LY DO SELL:\n" + _pSrcType + " label @ " + f_px(_pSrcPrice) + "\nCHoCH giam sau " + _pSrcType + ": " + str.tostring(_pChochOffset) + " nen\nPullback: YES - co rau nen xanh tren CHoCH\nKhong co HL giua " + _pSrcType + " va nen xac nhan\nNen do xac nhan sau CHoCH: " + str.tostring(_pBarsChoCHtoSell) + " nen\n" + _pSrcType + " -> S: " + str.tostring(_pEntryOffset) + "/" + str.tostring(maxBarsHHtoEntry) + " nen"
                 _tip = "SELL\n-----------------\nEntry: " + f_px(_pEntry) + "\nSL:    " + f_px(_pSL) + "  (tren nen do, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_pRisk) + "\n-----------------\n" + _reason
                 label.new(_pEntryBar, array.get(sell_p_entry_high, _idx), "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
                 _sellSig := true
@@ -2136,6 +2141,7 @@ if showEntries and top and (txt_top == 'HH' or txt_top == 'LH')
     int _chochOffsetS = na
     int _entryOffsetS = na
     bool _seenGreenS = false
+    bool _seenGreenWickAboveChoCHS = false
     bool _invalidS = false
 
     for _off = 1 to maxBarsHHtoChoCH
@@ -2152,8 +2158,12 @@ if showEntries and top and (txt_top == 'HH' or txt_top == 'LH')
                 else
                     if close[_barsBack] > open[_barsBack]
                         _seenGreenS := true
+                        _chochBackS = bar_index - (_hhBar + _chochOffsetS)
+                        _chochPriceS = ibtm_y[_chochBackS]
+                        if high[_barsBack] > _chochPriceS
+                            _seenGreenWickAboveChoCHS := true
                     _sellLevelS = f_sell_confirm_level(_barsBack)
-                    if _seenGreenS and close[_barsBack] < open[_barsBack] and close[_barsBack] < _sellLevelS
+                    if _seenGreenS and _seenGreenWickAboveChoCHS and close[_barsBack] < open[_barsBack] and close[_barsBack] < _sellLevelS
                         _entryOffsetS := _off
 
     if not na(_entryOffsetS)
@@ -2167,7 +2177,7 @@ if showEntries and top and (txt_top == 'HH' or txt_top == 'LH')
                 if not f_has_swing_btm_between(_hhBar, _entryBarS, 'HL')
                     _sellSig := true
                     _barsChoCHtoSell = _entryOffsetS - _chochOffsetS
-                    _reason = "LY DO SELL:\n" + txt_top + " label @ " + f_px(top) + "\nCHoCH giam sau " + txt_top + ": " + str.tostring(_chochOffsetS) + " nen\nPullback: YES\nKhong co HL giua " + txt_top + " va nen xac nhan\nNen do xac nhan sau CHoCH: " + str.tostring(_barsChoCHtoSell) + " nen\n" + txt_top + " -> S: " + str.tostring(_entryOffsetS) + "/" + str.tostring(maxBarsHHtoEntry) + " nen"
+                    _reason = "LY DO SELL:\n" + txt_top + " label @ " + f_px(top) + "\nCHoCH giam sau " + txt_top + ": " + str.tostring(_chochOffsetS) + " nen\nPullback: YES - co rau nen xanh tren CHoCH\nKhong co HL giua " + txt_top + " va nen xac nhan\nNen do xac nhan sau CHoCH: " + str.tostring(_barsChoCHtoSell) + " nen\n" + txt_top + " -> S: " + str.tostring(_entryOffsetS) + "/" + str.tostring(maxBarsHHtoEntry) + " nen"
                     _tip = "SELL\n-----------------\nEntry: " + f_px(_eEntryS) + "\nSL:    " + f_px(_eSLS) + "  (tren nen do, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskS) + "\n-----------------\n" + _reason
                     label.new(_entryBarS, high[_entryBackS], "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
             else
@@ -2201,14 +2211,14 @@ var float _bearBosLLLow = na
 _bosRevSellSig = false
 _bosRevBuySig = false
 
-if showBosReversal and bull_bos_hh_alert
+if showBosReversal and bull_bos_hh_alert and bull_ibos_alert[1]
     _bullBosHHBar := bar_index
     _bullBosHHOpen := open
     _bullBosHHClose := close
     _bullBosHHHigh := high
     _bullBosHHLow := low
 
-if showBosReversal and bear_bos_ll_alert
+if showBosReversal and bear_bos_ll_alert and bear_ibos_alert[1]
     _bearBosLLBar := bar_index
     _bearBosLLOpen := open
     _bearBosLLClose := close
@@ -2230,7 +2240,7 @@ if _bosRevBuySig
     _eRiskBRL = _eEntryBRL - _eSLBRL
     if _eRiskBRL > 0
         _barsAfterBos = bar_index - _bearBosLLBar
-        _tip = "BUY - BOS reversal\n-----------------\nEntry: " + f_px(_eEntryBRL) + "\nSL:    " + f_px(_eSLBRL) + "  (duoi day moi tao, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBRL) + "\n-----------------\nBearish BOS pha LL gan nhat\nMode: " + bosRevBreakMode + "\nNen xanh dong vuot muc " + f_px(_bosRevBuyLevel) + " sau " + str.tostring(_barsAfterBos) + "/" + str.tostring(maxBarsBosReversal) + " nen"
+        _tip = "BUY - BOS reversal\n-----------------\nEntry: " + f_px(_eEntryBRL) + "\nSL:    " + f_px(_eSLBRL) + "  (duoi day moi tao, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBRL) + "\n-----------------\nBearish BOS pha LL gan nhat\nNen truoc BOS: Internal bearish BOS\nMode: " + bosRevBreakMode + "\nNen xanh dong vuot muc " + f_px(_bosRevBuyLevel) + " sau " + str.tostring(_barsAfterBos) + "/" + str.tostring(maxBarsBosReversal) + " nen"
         label.new(bar_index, low, "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
         _bearBosLLBar := na
         _bearBosLLOpen := na
@@ -2244,7 +2254,7 @@ if _bosRevSellSig
     _eRiskBRS = _eSLBRS - _eEntryBRS
     if _eRiskBRS > 0
         _barsAfterBos = bar_index - _bullBosHHBar
-        _tip = "SELL - BOS reversal\n-----------------\nEntry: " + f_px(_eEntryBRS) + "\nSL:    " + f_px(_eSLBRS) + "  (tren dinh moi tao, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBRS) + "\n-----------------\nBullish BOS pha HH gan nhat\nMode: " + bosRevBreakMode + "\nNen do dong thung muc " + f_px(_bosRevSellLevel) + " sau " + str.tostring(_barsAfterBos) + "/" + str.tostring(maxBarsBosReversal) + " nen"
+        _tip = "SELL - BOS reversal\n-----------------\nEntry: " + f_px(_eEntryBRS) + "\nSL:    " + f_px(_eSLBRS) + "  (tren dinh moi tao, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBRS) + "\n-----------------\nBullish BOS pha HH gan nhat\nNen truoc BOS: Internal bullish BOS\nMode: " + bosRevBreakMode + "\nNen do dong thung muc " + f_px(_bosRevSellLevel) + " sau " + str.tostring(_barsAfterBos) + "/" + str.tostring(maxBarsBosReversal) + " nen"
         label.new(bar_index, high, "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
         _bullBosHHBar := na
         _bullBosHHOpen := na
