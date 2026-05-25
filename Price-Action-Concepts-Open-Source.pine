@@ -1881,6 +1881,17 @@ maxBarsHHtoEntry   = input.int (15,    "Max nen tu HH/LH -> S",                 
 // --- BOS reversal rule ---
 grpER = "Entry - BOS reversal"
 showBosReversal    = input.bool(true, "Bat tin hieu dao chieu sau BOS", group = grpER)
+maxBarsBosReversal = input.int(10, "Max nen sau BOS", minval = 1, maxval = 100, group = grpER)
+bosRevBreakMode = input.string("Vuot 80%", "Che do nen xac nhan BOS reversal", options = ["Vuot 50%", "Vuot 80%", "Vuot than", "Vuot dinh/day"], group = grpER)
+
+// --- BOS continuation rule ---
+grpEC = "Entry - BOS continuation"
+showBosContinuation = input.bool(true, "Bat tin hieu tiep dien sau BOS", group = grpEC)
+maxBarsBosContinuation = input.int(5, "Max nen sau BOS", minval = 1, maxval = 100, group = grpEC)
+minBosContPullbackBars = input.int(2, "So nen pullback toi thieu", minval = 1, maxval = 20, group = grpEC)
+bosContBreakMode = input.string("Vuot dinh/day", "Che do dong nen pha BOS", options = ["Vuot 50%", "Vuot 80%", "Vuot than", "Vuot dinh/day"], group = grpEC)
+bosContMinBodyPct = input.float(60.0, "Than nen xac nhan toi thieu (%)", minval = 1.0, maxval = 100.0, step = 1.0, group = grpEC)
+bosContMaxWickPct = input.float(25.0, "Moi rau nen xac nhan toi da (%)", minval = 0.0, maxval = 100.0, step = 1.0, group = grpEC)
 
 // --- Chung (SL/label) ---
 entrySLbufATR      = input.float(0.3,  "SL buffer ATR (duoi nen xanh / tren nen do)", minval = 0.0, step = 0.05, group = grpE)
@@ -1902,6 +1913,40 @@ f_sell_confirm_level(_barsBack) =>
     _prevBodyHigh = math.max(open[_barsBack + 1], close[_barsBack + 1])
     _prevBodySize = _prevBodyHigh - _prevBodyLow
     confirmBreakMode == "Vuot 50%" ? _prevBodyHigh - _prevBodySize * 0.5 : confirmBreakMode == "Vuot 80%" ? _prevBodyHigh - _prevBodySize * 0.8 : confirmBreakMode == "Vuot than" ? _prevBodyLow : low[_barsBack + 1]
+
+f_bos_rev_buy_level(_bosOpen, _bosClose, _bosHigh) =>
+    _bosBodyLow = math.min(_bosOpen, _bosClose)
+    _bosBodyHigh = math.max(_bosOpen, _bosClose)
+    _bosBodySize = _bosBodyHigh - _bosBodyLow
+    bosRevBreakMode == "Vuot 50%" ? _bosBodyLow + _bosBodySize * 0.5 : bosRevBreakMode == "Vuot 80%" ? _bosBodyLow + _bosBodySize * 0.8 : bosRevBreakMode == "Vuot than" ? _bosBodyHigh : _bosHigh
+
+f_bos_rev_sell_level(_bosOpen, _bosClose, _bosLow) =>
+    _bosBodyLow = math.min(_bosOpen, _bosClose)
+    _bosBodyHigh = math.max(_bosOpen, _bosClose)
+    _bosBodySize = _bosBodyHigh - _bosBodyLow
+    bosRevBreakMode == "Vuot 50%" ? _bosBodyHigh - _bosBodySize * 0.5 : bosRevBreakMode == "Vuot 80%" ? _bosBodyHigh - _bosBodySize * 0.8 : bosRevBreakMode == "Vuot than" ? _bosBodyLow : _bosLow
+
+f_bos_cont_buy_level(_bosOpen, _bosClose, _bosHigh) =>
+    _bosBodyLow = math.min(_bosOpen, _bosClose)
+    _bosBodyHigh = math.max(_bosOpen, _bosClose)
+    _bosBodySize = _bosBodyHigh - _bosBodyLow
+    bosContBreakMode == "Vuot 50%" ? _bosBodyLow + _bosBodySize * 0.5 : bosContBreakMode == "Vuot 80%" ? _bosBodyLow + _bosBodySize * 0.8 : bosContBreakMode == "Vuot than" ? _bosBodyHigh : _bosHigh
+
+f_bos_cont_sell_level(_bosOpen, _bosClose, _bosLow) =>
+    _bosBodyLow = math.min(_bosOpen, _bosClose)
+    _bosBodyHigh = math.max(_bosOpen, _bosClose)
+    _bosBodySize = _bosBodyHigh - _bosBodyLow
+    bosContBreakMode == "Vuot 50%" ? _bosBodyHigh - _bosBodySize * 0.5 : bosContBreakMode == "Vuot 80%" ? _bosBodyHigh - _bosBodySize * 0.8 : bosContBreakMode == "Vuot than" ? _bosBodyLow : _bosLow
+
+f_bos_cont_confirm_candle(_isBuy) =>
+    _range = high - low
+    _body = math.abs(close - open)
+    _upperWick = high - math.max(open, close)
+    _lowerWick = math.min(open, close) - low
+    _bodyOk = _range > 0 and _body / _range * 100 >= bosContMinBodyPct
+    _wickOk = _range > 0 and _upperWick / _range * 100 <= bosContMaxWickPct and _lowerWick / _range * 100 <= bosContMaxWickPct
+    _dirOk = _isBuy ? close > open : close < open
+    _dirOk and _bodyOk and _wickOk
 
 //-----------------------------------------------------------------------------
 // BUY RULE - dung chinh nhan LL/HL tren chart
@@ -1994,30 +2039,186 @@ alertcondition(_sellSig, "Entry SELL", "PAC Entry: SELL signal")
 //-----------------------------------------------------------------------------
 // BOS REVERSAL RULE
 //-----------------------------------------------------------------------------
-_bullBosPrev = bull_bos_hh_alert[1]
-_bearBosPrev = bear_bos_ll_alert[1]
-_prevBosBodyLow = math.min(open[1], close[1])
-_prevBosBodyHigh = math.max(open[1], close[1])
+var int   _bullBosHHBar = na
+var float _bullBosHHOpen = na
+var float _bullBosHHClose = na
+var float _bullBosHHHigh = na
+var float _bullBosHHLow = na
+var int   _bearBosLLBar = na
+var float _bearBosLLOpen = na
+var float _bearBosLLClose = na
+var float _bearBosLLHigh = na
+var float _bearBosLLLow = na
 
-_bosRevSellSig = showEntries and showBosReversal and _bullBosPrev and close < open and close < _prevBosBodyLow
-_bosRevBuySig = showEntries and showBosReversal and _bearBosPrev and close > open and close > _prevBosBodyHigh
+_bosRevSellSig = false
+_bosRevBuySig = false
+
+if showBosReversal and bull_bos_hh_alert
+    _bullBosHHBar := bar_index
+    _bullBosHHOpen := open
+    _bullBosHHClose := close
+    _bullBosHHHigh := high
+    _bullBosHHLow := low
+
+if showBosReversal and bear_bos_ll_alert
+    _bearBosLLBar := bar_index
+    _bearBosLLOpen := open
+    _bearBosLLClose := close
+    _bearBosLLHigh := high
+    _bearBosLLLow := low
+
+_inBullBosWindow = showEntries and showBosReversal and not na(_bullBosHHBar) and bar_index > _bullBosHHBar and bar_index - _bullBosHHBar <= maxBarsBosReversal
+_inBearBosWindow = showEntries and showBosReversal and not na(_bearBosLLBar) and bar_index > _bearBosLLBar and bar_index - _bearBosLLBar <= maxBarsBosReversal
+
+_bosRevSellLevel = f_bos_rev_sell_level(_bullBosHHOpen, _bullBosHHClose, _bullBosHHLow)
+_bosRevBuyLevel = f_bos_rev_buy_level(_bearBosLLOpen, _bearBosLLClose, _bearBosLLHigh)
+
+_bosRevSellSig := _inBullBosWindow and close < open and close < _bosRevSellLevel
+_bosRevBuySig := _inBearBosWindow and close > open and close > _bosRevBuyLevel
 
 if _bosRevBuySig
     _eEntryBRL = close
-    _eSLBRL = low[1] - atrE * entrySLbufATR
+    _eSLBRL = _bearBosLLLow - atrE * entrySLbufATR
     _eRiskBRL = _eEntryBRL - _eSLBRL
     if _eRiskBRL > 0
-        _tip = "BUY - BOS reversal\n-----------------\nEntry: " + f_px(_eEntryBRL) + "\nSL:    " + f_px(_eSLBRL) + "  (duoi day moi tao, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBRL) + "\n-----------------\nBearish BOS pha LL gan nhat o nen truoc\nNen xac nhan xanh dong tren than nen BOS"
+        _barsAfterBos = bar_index - _bearBosLLBar
+        _tip = "BUY - BOS reversal\n-----------------\nEntry: " + f_px(_eEntryBRL) + "\nSL:    " + f_px(_eSLBRL) + "  (duoi day moi tao, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBRL) + "\n-----------------\nBearish BOS pha LL gan nhat\nMode: " + bosRevBreakMode + "\nNen xanh dong vuot muc " + f_px(_bosRevBuyLevel) + " sau " + str.tostring(_barsAfterBos) + "/" + str.tostring(maxBarsBosReversal) + " nen"
         label.new(bar_index, low, "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+        _bearBosLLBar := na
+        _bearBosLLOpen := na
+        _bearBosLLClose := na
+        _bearBosLLHigh := na
+        _bearBosLLLow := na
 
 if _bosRevSellSig
     _eEntryBRS = close
-    _eSLBRS = high[1] + atrE * entrySLbufATR
+    _eSLBRS = _bullBosHHHigh + atrE * entrySLbufATR
     _eRiskBRS = _eSLBRS - _eEntryBRS
     if _eRiskBRS > 0
-        _tip = "SELL - BOS reversal\n-----------------\nEntry: " + f_px(_eEntryBRS) + "\nSL:    " + f_px(_eSLBRS) + "  (tren dinh moi tao, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBRS) + "\n-----------------\nBullish BOS pha HH gan nhat o nen truoc\nNen xac nhan do dong duoi than nen BOS"
+        _barsAfterBos = bar_index - _bullBosHHBar
+        _tip = "SELL - BOS reversal\n-----------------\nEntry: " + f_px(_eEntryBRS) + "\nSL:    " + f_px(_eSLBRS) + "  (tren dinh moi tao, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBRS) + "\n-----------------\nBullish BOS pha HH gan nhat\nMode: " + bosRevBreakMode + "\nNen do dong thung muc " + f_px(_bosRevSellLevel) + " sau " + str.tostring(_barsAfterBos) + "/" + str.tostring(maxBarsBosReversal) + " nen"
         label.new(bar_index, high, "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+        _bullBosHHBar := na
+        _bullBosHHOpen := na
+        _bullBosHHClose := na
+        _bullBosHHHigh := na
+        _bullBosHHLow := na
+
+if not na(_bullBosHHBar) and bar_index - _bullBosHHBar > maxBarsBosReversal
+    _bullBosHHBar := na
+    _bullBosHHOpen := na
+    _bullBosHHClose := na
+    _bullBosHHHigh := na
+    _bullBosHHLow := na
+
+if not na(_bearBosLLBar) and bar_index - _bearBosLLBar > maxBarsBosReversal
+    _bearBosLLBar := na
+    _bearBosLLOpen := na
+    _bearBosLLClose := na
+    _bearBosLLHigh := na
+    _bearBosLLLow := na
 
 alertcondition(_bosRevBuySig, "Entry BUY - BOS Reversal", "PAC Entry: BUY BOS reversal signal")
 alertcondition(_bosRevSellSig, "Entry SELL - BOS Reversal", "PAC Entry: SELL BOS reversal signal")
+
+//-----------------------------------------------------------------------------
+// BOS CONTINUATION RULE
+//-----------------------------------------------------------------------------
+var int   _bullBosContBar = na
+var float _bullBosContOpen = na
+var float _bullBosContClose = na
+var float _bullBosContHigh = na
+var float _bullBosContLow = na
+var int   _bullBosContPullbacks = 0
+var int   _bearBosContBar = na
+var float _bearBosContOpen = na
+var float _bearBosContClose = na
+var float _bearBosContHigh = na
+var float _bearBosContLow = na
+var int   _bearBosContPullbacks = 0
+
+_bosContBuySig = false
+_bosContSellSig = false
+
+_inBullBosContWindow = showEntries and showBosContinuation and not na(_bullBosContBar) and bar_index > _bullBosContBar and bar_index - _bullBosContBar <= maxBarsBosContinuation
+_inBearBosContWindow = showEntries and showBosContinuation and not na(_bearBosContBar) and bar_index > _bearBosContBar and bar_index - _bearBosContBar <= maxBarsBosContinuation
+
+_bullBosContLevel = f_bos_cont_buy_level(_bullBosContOpen, _bullBosContClose, _bullBosContHigh)
+_bearBosContLevel = f_bos_cont_sell_level(_bearBosContOpen, _bearBosContClose, _bearBosContLow)
+_bullBosContConfirm = f_bos_cont_confirm_candle(true)
+_bearBosContConfirm = f_bos_cont_confirm_candle(false)
+
+_bosContBuySig := _inBullBosContWindow and _bullBosContPullbacks >= minBosContPullbackBars and _bullBosContConfirm and close > _bullBosContLevel
+_bosContSellSig := _inBearBosContWindow and _bearBosContPullbacks >= minBosContPullbackBars and _bearBosContConfirm and close < _bearBosContLevel
+
+if _bosContBuySig
+    _eEntryBCB = close
+    _eSLBCB = _bullBosContLow - atrE * entrySLbufATR
+    _eRiskBCB = _eEntryBCB - _eSLBCB
+    if _eRiskBCB > 0
+        _barsAfterBullBos = bar_index - _bullBosContBar
+        _tip = "BUY - BOS continuation\n-----------------\nEntry: " + f_px(_eEntryBCB) + "\nSL:    " + f_px(_eSLBCB) + "  (duoi day nen BOS, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBCB) + "\n-----------------\nBOS tang gan nhat\nPullback do: " + str.tostring(_bullBosContPullbacks) + "/" + str.tostring(minBosContPullbackBars) + " nen\nMode: " + bosContBreakMode + "\nClose pha muc " + f_px(_bullBosContLevel) + " sau " + str.tostring(_barsAfterBullBos) + "/" + str.tostring(maxBarsBosContinuation) + " nen\nNen xac nhan: than >= " + str.tostring(bosContMinBodyPct, "#") + "%, moi rau <= " + str.tostring(bosContMaxWickPct, "#") + "%"
+        label.new(bar_index, low, "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+        _bullBosContBar := na
+        _bullBosContOpen := na
+        _bullBosContClose := na
+        _bullBosContHigh := na
+        _bullBosContLow := na
+        _bullBosContPullbacks := 0
+
+if _bosContSellSig
+    _eEntryBCS = close
+    _eSLBCS = _bearBosContHigh + atrE * entrySLbufATR
+    _eRiskBCS = _eSLBCS - _eEntryBCS
+    if _eRiskBCS > 0
+        _barsAfterBearBos = bar_index - _bearBosContBar
+        _tip = "SELL - BOS continuation\n-----------------\nEntry: " + f_px(_eEntryBCS) + "\nSL:    " + f_px(_eSLBCS) + "  (tren dinh nen BOS, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBCS) + "\n-----------------\nBOS giam gan nhat\nPullback xanh: " + str.tostring(_bearBosContPullbacks) + "/" + str.tostring(minBosContPullbackBars) + " nen\nMode: " + bosContBreakMode + "\nClose pha muc " + f_px(_bearBosContLevel) + " sau " + str.tostring(_barsAfterBearBos) + "/" + str.tostring(maxBarsBosContinuation) + " nen\nNen xac nhan: than >= " + str.tostring(bosContMinBodyPct, "#") + "%, moi rau <= " + str.tostring(bosContMaxWickPct, "#") + "%"
+        label.new(bar_index, high, "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+        _bearBosContBar := na
+        _bearBosContOpen := na
+        _bearBosContClose := na
+        _bearBosContHigh := na
+        _bearBosContLow := na
+        _bearBosContPullbacks := 0
+
+if not na(_bullBosContBar) and bar_index - _bullBosContBar > maxBarsBosContinuation
+    _bullBosContBar := na
+    _bullBosContOpen := na
+    _bullBosContClose := na
+    _bullBosContHigh := na
+    _bullBosContLow := na
+    _bullBosContPullbacks := 0
+
+if not na(_bearBosContBar) and bar_index - _bearBosContBar > maxBarsBosContinuation
+    _bearBosContBar := na
+    _bearBosContOpen := na
+    _bearBosContClose := na
+    _bearBosContHigh := na
+    _bearBosContLow := na
+    _bearBosContPullbacks := 0
+
+if _inBullBosContWindow and not _bosContBuySig and close < open
+    _bullBosContPullbacks += 1
+
+if _inBearBosContWindow and not _bosContSellSig and close > open
+    _bearBosContPullbacks += 1
+
+if showBosContinuation and (bull_bos_alert or bull_ibos_alert)
+    _bullBosContBar := bar_index
+    _bullBosContOpen := open
+    _bullBosContClose := close
+    _bullBosContHigh := high
+    _bullBosContLow := low
+    _bullBosContPullbacks := 0
+
+if showBosContinuation and (bear_bos_alert or bear_ibos_alert)
+    _bearBosContBar := bar_index
+    _bearBosContOpen := open
+    _bearBosContClose := close
+    _bearBosContHigh := high
+    _bearBosContLow := low
+    _bearBosContPullbacks := 0
+
+alertcondition(_bosContBuySig, "Entry BUY - BOS Continuation", "PAC Entry: BUY BOS continuation signal")
+alertcondition(_bosContSellSig, "Entry SELL - BOS Continuation", "PAC Entry: SELL BOS continuation signal")
 //-----------------------------------------------------------------------------}
