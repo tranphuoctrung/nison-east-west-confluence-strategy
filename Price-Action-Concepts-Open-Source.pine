@@ -184,7 +184,7 @@ n = bar_index
 //-----------------------------------------------------------------------------}      
 //UDT's
 //-----------------------------------------------------------------------------{
-type piv
+type pacPiv
     float prc // price
     int   bix // bar_index
     bool  brk // broken
@@ -202,8 +202,8 @@ type boxBr
 //-----------------------------------------------------------------------------}      
 //Variables
 //-----------------------------------------------------------------------------{
-var array< piv >aPivH  = array.new< piv >(1, piv.new  ())
-var array< piv >aPivL  = array.new< piv >(1, piv.new  ())
+var array<pacPiv>aPivH  = array.new<pacPiv>(1, pacPiv.new())
+var array<pacPiv>aPivL  = array.new<pacPiv>(1, pacPiv.new())
 var array<boxBr>aBoxBr = array.new<boxBr>(1, boxBr.new())
 
 //-----------------------------------------------------------------------------}      
@@ -211,16 +211,16 @@ var array<boxBr>aBoxBr = array.new<boxBr>(1, boxBr.new())
 //-----------------------------------------------------------------------------{
 method n(float piv) => bool out = not na(piv)
 
-method p(piv piv, float val) => float out = (100 / piv.prc * val) - 100
+method p(pacPiv piv, float val) => float out = (100 / piv.prc * val) - 100
 
-method l(piv get, color c, string s='sd') => 
+method l(pacPiv get, color c, string s='sd') => 
     style = switch s 
         'dt' => line.style_dotted
         'ds' => line.style_dashed
         =>      line.style_solid 
     line.new(get.bix, get.prc, n, get.prc, color=c, style = style)
 
-method br(piv get, color c3, color c, int d) =>
+method br(pacPiv get, color c3, color c, int d) =>
     y1 = d == 1 ? high : get.prc
     y2 = d == 1 ? get.prc : low
     boxBr.new( 
@@ -241,11 +241,11 @@ lnDot(y, c) => line.new(n, y, n+3, y, color=c, style=line.style_dotted)
 ph = ta.pivothigh(len12345, len12345)
 pl = ta.pivotlow (len12345, len12345)
 
-if ph.n() 
-    aPivH.unshift(piv.new(ph, n -len12345, false, false, false, false))
+if ph.n()
+    aPivH.unshift(pacPiv.new(ph, n -len12345, false, false, false, false))
 
-if pl.n() 
-    aPivL.unshift(piv.new(pl, n -len12345, false, false, false, false)) 
+if pl.n()
+    aPivL.unshift(pacPiv.new(pl, n -len12345, false, false, false, false)) 
 bool bullcandle = false
 bool bearcandle = false
 
@@ -773,8 +773,10 @@ var itop_cross = true, var ibtm_cross = true
 var txt_top = '',  var txt_btm = ''
 var swing_top_bars = array.new_int(0)
 var swing_top_types = array.new_string(0)
+var swing_top_prices = array.new_float(0)
 var swing_btm_bars = array.new_int(0)
 var swing_btm_types = array.new_string(0)
+var swing_btm_prices = array.new_float(0)
 
 //Alerts
 bull_choch_alert = false 
@@ -854,9 +856,11 @@ if top
     txt_top := top > top_y ? 'HH' : 'LH'
     array.push(swing_top_bars, n - length)
     array.push(swing_top_types, txt_top)
+    array.push(swing_top_prices, top)
     if array.size(swing_top_bars) > 500
         array.shift(swing_top_bars)
         array.shift(swing_top_types)
+        array.shift(swing_top_prices)
 
     if show_swings
         top_lbl = label.new(n-length, top, txt_top
@@ -915,9 +919,11 @@ if btm
     txt_btm := btm < btm_y ? 'LL' : 'HL'
     array.push(swing_btm_bars, n - length)
     array.push(swing_btm_types, txt_btm)
+    array.push(swing_btm_prices, btm)
     if array.size(swing_btm_bars) > 500
         array.shift(swing_btm_bars)
         array.shift(swing_btm_types)
+        array.shift(swing_btm_prices)
     
     if show_swings
         btm_lbl = label.new(n - length, btm, txt_btm
@@ -1906,6 +1912,11 @@ minBosContPullbackBars = input.int(2, "So nen pullback toi thieu", minval = 1, m
 bosContBreakMode = input.string("Vuot dinh/day", "Che do dong nen pha BOS", options = ["Vuot 50%", "Vuot 80%", "Vuot than", "Vuot dinh/day"], group = grpEC)
 bosContMinBodyPct = input.float(60.0, "Than nen xac nhan toi thieu (%)", minval = 1.0, maxval = 100.0, step = 1.0, group = grpEC)
 bosContMaxWickPct = input.float(25.0, "Moi rau nen xac nhan toi da (%)", minval = 0.0, maxval = 100.0, step = 1.0, group = grpEC)
+bosContRequireFVG = input.bool(true, "Yeu cau FVG gan nen xac nhan", group = grpEC)
+bosContFvgLookback = input.int(0, "So nen quet FVG gan nen xac nhan", minval = 0, maxval = 50, group = grpEC)
+bosContFvgNearATR = input.float(0.0, "Khoang cach FVG gan nen xac nhan (ATR)", minval = 0.0, step = 0.05, group = grpEC)
+maxBarsBosContSwing = input.int(15, "Max nen tu HL/LH gan nhat -> xac nhan", minval = 1, maxval = 200, group = grpEC)
+maxAtrBosContSwing = input.float(3.0, "Max ATR tu HL/LH gan nhat -> xac nhan", minval = 0.1, step = 0.1, group = grpEC)
 
 // --- Chung (SL/label) ---
 entrySLbufATR      = input.float(0.3,  "SL buffer ATR (duoi nen xanh / tren nen do)", minval = 0.0, step = 0.05, group = grpE)
@@ -1962,6 +1973,26 @@ f_bos_cont_confirm_candle(_isBuy) =>
     _dirOk = _isBuy ? close > open : close < open
     _dirOk and _bodyOk and _wickOk
 
+f_bos_cont_fvg(_isBuy) =>
+    bool _found = false
+    _near = atrE * bosContFvgNearATR
+    for _i = 0 to bosContFvgLookback
+        _canCheck = bar_index >= _i + 2
+        if _canCheck
+            _bullFvg = low[_i] > high[_i + 2]
+            _bearFvg = high[_i] < low[_i + 2]
+            if _isBuy and _bullFvg
+                _zoneTop = low[_i]
+                _zoneBtm = high[_i + 2]
+                if low <= _zoneTop + _near and low >= _zoneBtm - _near
+                    _found := true
+            if not _isBuy and _bearFvg
+                _zoneTop = low[_i + 2]
+                _zoneBtm = high[_i]
+                if high <= _zoneTop + _near and high >= _zoneBtm - _near
+                    _found := true
+    not bosContRequireFVG or _found
+
 f_has_swing_top_between(_fromBar, _toBar, _swingType) =>
     bool _found = false
     _count = array.size(swing_top_bars)
@@ -1981,6 +2012,32 @@ f_has_swing_btm_between(_fromBar, _toBar, _swingType) =>
             _swingBar = array.get(swing_btm_bars, _i)
             _type = array.get(swing_btm_types, _i)
             if _swingBar > _fromBar and _swingBar < _toBar and _type == _swingType
+                _found := true
+    _found
+
+f_has_recent_swing_top(_toBar, _toPrice, _atr, _swingType, _maxBars, _maxAtr) =>
+    bool _found = false
+    _count = array.size(swing_top_bars)
+    if _count > 0
+        for _i = 0 to _count - 1
+            _swingBar = array.get(swing_top_bars, _i)
+            _type = array.get(swing_top_types, _i)
+            _swingPrice = array.get(swing_top_prices, _i)
+            _atrOk = _atr > 0 and math.abs(_swingPrice - _toPrice) <= _atr * _maxAtr
+            if _swingBar <= _toBar and _toBar - _swingBar <= _maxBars and _type == _swingType and _atrOk
+                _found := true
+    _found
+
+f_has_recent_swing_btm(_toBar, _toPrice, _atr, _swingType, _maxBars, _maxAtr) =>
+    bool _found = false
+    _count = array.size(swing_btm_bars)
+    if _count > 0
+        for _i = 0 to _count - 1
+            _swingBar = array.get(swing_btm_bars, _i)
+            _type = array.get(swing_btm_types, _i)
+            _swingPrice = array.get(swing_btm_prices, _i)
+            _atrOk = _atr > 0 and math.abs(_swingPrice - _toPrice) <= _atr * _maxAtr
+            if _swingBar <= _toBar and _toBar - _swingBar <= _maxBars and _type == _swingType and _atrOk
                 _found := true
     _found
 
@@ -2294,9 +2351,81 @@ var float _bearBosContClose = na
 var float _bearBosContHigh = na
 var float _bearBosContLow = na
 var int   _bearBosContPullbacks = 0
+var bos_cont_buy_p_entry_bar = array.new_int(0)
+var bos_cont_buy_p_low = array.new_float(0)
+var bos_cont_buy_p_entry = array.new_float(0)
+var bos_cont_buy_p_sl = array.new_float(0)
+var bos_cont_buy_p_risk = array.new_float(0)
+var bos_cont_buy_p_atr = array.new_float(0)
+var bos_cont_buy_p_bos_bar = array.new_int(0)
+var bos_cont_buy_p_pullbacks = array.new_int(0)
+var bos_cont_buy_p_level = array.new_float(0)
+var bos_cont_sell_p_entry_bar = array.new_int(0)
+var bos_cont_sell_p_high = array.new_float(0)
+var bos_cont_sell_p_entry = array.new_float(0)
+var bos_cont_sell_p_sl = array.new_float(0)
+var bos_cont_sell_p_risk = array.new_float(0)
+var bos_cont_sell_p_atr = array.new_float(0)
+var bos_cont_sell_p_bos_bar = array.new_int(0)
+var bos_cont_sell_p_pullbacks = array.new_int(0)
+var bos_cont_sell_p_level = array.new_float(0)
 
 _bosContBuySig = false
 _bosContSellSig = false
+
+_bosContBuyPendingCount = array.size(bos_cont_buy_p_entry_bar)
+if _bosContBuyPendingCount > 0
+    for _j = 0 to _bosContBuyPendingCount - 1
+        _idx = _bosContBuyPendingCount - 1 - _j
+        _pEntryBar = array.get(bos_cont_buy_p_entry_bar, _idx)
+        if bar_index >= _pEntryBar + length
+            if f_has_recent_swing_btm(_pEntryBar, array.get(bos_cont_buy_p_entry, _idx), array.get(bos_cont_buy_p_atr, _idx), 'HL', maxBarsBosContSwing, maxAtrBosContSwing)
+                _pEntry = array.get(bos_cont_buy_p_entry, _idx)
+                _pSL = array.get(bos_cont_buy_p_sl, _idx)
+                _pRisk = array.get(bos_cont_buy_p_risk, _idx)
+                _pBosBar = array.get(bos_cont_buy_p_bos_bar, _idx)
+                _pPullbacks = array.get(bos_cont_buy_p_pullbacks, _idx)
+                _pLevel = array.get(bos_cont_buy_p_level, _idx)
+                _barsAfterBullBos = _pEntryBar - _pBosBar
+                _tip = "BUY - BOS continuation\n-----------------\nEntry: " + f_px(_pEntry) + "\nSL:    " + f_px(_pSL) + "  (duoi day nen BOS, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_pRisk) + "\n-----------------\nBOS tang gan nhat\nHL gan nen xac nhan: <= " + str.tostring(maxBarsBosContSwing) + " nen va <= " + str.tostring(maxAtrBosContSwing, "#.#") + " ATR\nPullback do: " + str.tostring(_pPullbacks) + "/" + str.tostring(minBosContPullbackBars) + " nen\nFVG: bullish FVG gan day nen xac nhan\nMode: " + bosContBreakMode + "\nClose pha muc " + f_px(_pLevel) + " sau " + str.tostring(_barsAfterBullBos) + "/" + str.tostring(maxBarsBosContinuation) + " nen\nNen xac nhan: than >= " + str.tostring(bosContMinBodyPct, "#") + "%, moi rau <= " + str.tostring(bosContMaxWickPct, "#") + "%"
+                label.new(_pEntryBar, array.get(bos_cont_buy_p_low, _idx), "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+                _bosContBuySig := true
+            array.remove(bos_cont_buy_p_entry_bar, _idx)
+            array.remove(bos_cont_buy_p_low, _idx)
+            array.remove(bos_cont_buy_p_entry, _idx)
+            array.remove(bos_cont_buy_p_sl, _idx)
+            array.remove(bos_cont_buy_p_risk, _idx)
+            array.remove(bos_cont_buy_p_atr, _idx)
+            array.remove(bos_cont_buy_p_bos_bar, _idx)
+            array.remove(bos_cont_buy_p_pullbacks, _idx)
+            array.remove(bos_cont_buy_p_level, _idx)
+
+_bosContSellPendingCount = array.size(bos_cont_sell_p_entry_bar)
+if _bosContSellPendingCount > 0
+    for _j = 0 to _bosContSellPendingCount - 1
+        _idx = _bosContSellPendingCount - 1 - _j
+        _pEntryBar = array.get(bos_cont_sell_p_entry_bar, _idx)
+        if bar_index >= _pEntryBar + length
+            if f_has_recent_swing_top(_pEntryBar, array.get(bos_cont_sell_p_entry, _idx), array.get(bos_cont_sell_p_atr, _idx), 'LH', maxBarsBosContSwing, maxAtrBosContSwing)
+                _pEntry = array.get(bos_cont_sell_p_entry, _idx)
+                _pSL = array.get(bos_cont_sell_p_sl, _idx)
+                _pRisk = array.get(bos_cont_sell_p_risk, _idx)
+                _pBosBar = array.get(bos_cont_sell_p_bos_bar, _idx)
+                _pPullbacks = array.get(bos_cont_sell_p_pullbacks, _idx)
+                _pLevel = array.get(bos_cont_sell_p_level, _idx)
+                _barsAfterBearBos = _pEntryBar - _pBosBar
+                _tip = "SELL - BOS continuation\n-----------------\nEntry: " + f_px(_pEntry) + "\nSL:    " + f_px(_pSL) + "  (tren dinh nen BOS, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_pRisk) + "\n-----------------\nBOS giam gan nhat\nLH gan nen xac nhan: <= " + str.tostring(maxBarsBosContSwing) + " nen va <= " + str.tostring(maxAtrBosContSwing, "#.#") + " ATR\nPullback xanh: " + str.tostring(_pPullbacks) + "/" + str.tostring(minBosContPullbackBars) + " nen\nFVG: bearish FVG gan dinh nen xac nhan\nMode: " + bosContBreakMode + "\nClose pha muc " + f_px(_pLevel) + " sau " + str.tostring(_barsAfterBearBos) + "/" + str.tostring(maxBarsBosContinuation) + " nen\nNen xac nhan: than >= " + str.tostring(bosContMinBodyPct, "#") + "%, moi rau <= " + str.tostring(bosContMaxWickPct, "#") + "%"
+                label.new(_pEntryBar, array.get(bos_cont_sell_p_high, _idx), "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+                _bosContSellSig := true
+            array.remove(bos_cont_sell_p_entry_bar, _idx)
+            array.remove(bos_cont_sell_p_high, _idx)
+            array.remove(bos_cont_sell_p_entry, _idx)
+            array.remove(bos_cont_sell_p_sl, _idx)
+            array.remove(bos_cont_sell_p_risk, _idx)
+            array.remove(bos_cont_sell_p_atr, _idx)
+            array.remove(bos_cont_sell_p_bos_bar, _idx)
+            array.remove(bos_cont_sell_p_pullbacks, _idx)
+            array.remove(bos_cont_sell_p_level, _idx)
 
 _inBullBosContWindow = showEntries and showBosContinuation and not na(_bullBosContBar) and bar_index > _bullBosContBar and bar_index - _bullBosContBar <= maxBarsBosContinuation
 _inBearBosContWindow = showEntries and showBosContinuation and not na(_bearBosContBar) and bar_index > _bearBosContBar and bar_index - _bearBosContBar <= maxBarsBosContinuation
@@ -2305,17 +2434,23 @@ _bullBosContLevel = f_bos_cont_buy_level(_bullBosContOpen, _bullBosContClose, _b
 _bearBosContLevel = f_bos_cont_sell_level(_bearBosContOpen, _bearBosContClose, _bearBosContLow)
 _bullBosContConfirm = f_bos_cont_confirm_candle(true)
 _bearBosContConfirm = f_bos_cont_confirm_candle(false)
+_bullBosContFVG = f_bos_cont_fvg(true)
+_bearBosContFVG = f_bos_cont_fvg(false)
+_bullBosContHL = f_has_recent_swing_btm(bar_index, close, atrE, 'HL', maxBarsBosContSwing, maxAtrBosContSwing)
+_bearBosContLH = f_has_recent_swing_top(bar_index, close, atrE, 'LH', maxBarsBosContSwing, maxAtrBosContSwing)
+_bosContBuyReady = _inBullBosContWindow and _bullBosContPullbacks >= minBosContPullbackBars and _bullBosContConfirm and _bullBosContFVG and close > _bullBosContLevel
+_bosContSellReady = _inBearBosContWindow and _bearBosContPullbacks >= minBosContPullbackBars and _bearBosContConfirm and _bearBosContFVG and close < _bearBosContLevel
 
-_bosContBuySig := _inBullBosContWindow and _bullBosContPullbacks >= minBosContPullbackBars and _bullBosContConfirm and close > _bullBosContLevel
-_bosContSellSig := _inBearBosContWindow and _bearBosContPullbacks >= minBosContPullbackBars and _bearBosContConfirm and close < _bearBosContLevel
+_bosContBuySig := _bosContBuySig or (_bosContBuyReady and _bullBosContHL)
+_bosContSellSig := _bosContSellSig or (_bosContSellReady and _bearBosContLH)
 
 if _bosContBuySig
     _eEntryBCB = close
     _eSLBCB = _bullBosContLow - atrE * entrySLbufATR
     _eRiskBCB = _eEntryBCB - _eSLBCB
-    if _eRiskBCB > 0
+    if _eRiskBCB > 0 and _bosContBuyReady and _bullBosContHL
         _barsAfterBullBos = bar_index - _bullBosContBar
-        _tip = "BUY - BOS continuation\n-----------------\nEntry: " + f_px(_eEntryBCB) + "\nSL:    " + f_px(_eSLBCB) + "  (duoi day nen BOS, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBCB) + "\n-----------------\nBOS tang gan nhat\nPullback do: " + str.tostring(_bullBosContPullbacks) + "/" + str.tostring(minBosContPullbackBars) + " nen\nMode: " + bosContBreakMode + "\nClose pha muc " + f_px(_bullBosContLevel) + " sau " + str.tostring(_barsAfterBullBos) + "/" + str.tostring(maxBarsBosContinuation) + " nen\nNen xac nhan: than >= " + str.tostring(bosContMinBodyPct, "#") + "%, moi rau <= " + str.tostring(bosContMaxWickPct, "#") + "%"
+        _tip = "BUY - BOS continuation\n-----------------\nEntry: " + f_px(_eEntryBCB) + "\nSL:    " + f_px(_eSLBCB) + "  (duoi day nen BOS, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBCB) + "\n-----------------\nBOS tang gan nhat\nHL gan nen xac nhan: <= " + str.tostring(maxBarsBosContSwing) + " nen va <= " + str.tostring(maxAtrBosContSwing, "#.#") + " ATR\nPullback do: " + str.tostring(_bullBosContPullbacks) + "/" + str.tostring(minBosContPullbackBars) + " nen\nFVG: bullish FVG gan day nen xac nhan\nMode: " + bosContBreakMode + "\nClose pha muc " + f_px(_bullBosContLevel) + " sau " + str.tostring(_barsAfterBullBos) + "/" + str.tostring(maxBarsBosContinuation) + " nen\nNen xac nhan: than >= " + str.tostring(bosContMinBodyPct, "#") + "%, moi rau <= " + str.tostring(bosContMaxWickPct, "#") + "%"
         label.new(bar_index, low, "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
         _bullBosContBar := na
         _bullBosContOpen := na
@@ -2328,10 +2463,52 @@ if _bosContSellSig
     _eEntryBCS = close
     _eSLBCS = _bearBosContHigh + atrE * entrySLbufATR
     _eRiskBCS = _eSLBCS - _eEntryBCS
-    if _eRiskBCS > 0
+    if _eRiskBCS > 0 and _bosContSellReady and _bearBosContLH
         _barsAfterBearBos = bar_index - _bearBosContBar
-        _tip = "SELL - BOS continuation\n-----------------\nEntry: " + f_px(_eEntryBCS) + "\nSL:    " + f_px(_eSLBCS) + "  (tren dinh nen BOS, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBCS) + "\n-----------------\nBOS giam gan nhat\nPullback xanh: " + str.tostring(_bearBosContPullbacks) + "/" + str.tostring(minBosContPullbackBars) + " nen\nMode: " + bosContBreakMode + "\nClose pha muc " + f_px(_bearBosContLevel) + " sau " + str.tostring(_barsAfterBearBos) + "/" + str.tostring(maxBarsBosContinuation) + " nen\nNen xac nhan: than >= " + str.tostring(bosContMinBodyPct, "#") + "%, moi rau <= " + str.tostring(bosContMaxWickPct, "#") + "%"
+        _tip = "SELL - BOS continuation\n-----------------\nEntry: " + f_px(_eEntryBCS) + "\nSL:    " + f_px(_eSLBCS) + "  (tren dinh nen BOS, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBCS) + "\n-----------------\nBOS giam gan nhat\nLH gan nen xac nhan: <= " + str.tostring(maxBarsBosContSwing) + " nen va <= " + str.tostring(maxAtrBosContSwing, "#.#") + " ATR\nPullback xanh: " + str.tostring(_bearBosContPullbacks) + "/" + str.tostring(minBosContPullbackBars) + " nen\nFVG: bearish FVG gan dinh nen xac nhan\nMode: " + bosContBreakMode + "\nClose pha muc " + f_px(_bearBosContLevel) + " sau " + str.tostring(_barsAfterBearBos) + "/" + str.tostring(maxBarsBosContinuation) + " nen\nNen xac nhan: than >= " + str.tostring(bosContMinBodyPct, "#") + "%, moi rau <= " + str.tostring(bosContMaxWickPct, "#") + "%"
         label.new(bar_index, high, "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+        _bearBosContBar := na
+        _bearBosContOpen := na
+        _bearBosContClose := na
+        _bearBosContHigh := na
+        _bearBosContLow := na
+        _bearBosContPullbacks := 0
+
+if _bosContBuyReady and not _bullBosContHL
+    _eEntryBCBP = close
+    _eSLBCBP = _bullBosContLow - atrE * entrySLbufATR
+    _eRiskBCBP = _eEntryBCBP - _eSLBCBP
+    if _eRiskBCBP > 0
+        array.push(bos_cont_buy_p_entry_bar, bar_index)
+        array.push(bos_cont_buy_p_low, low)
+        array.push(bos_cont_buy_p_entry, _eEntryBCBP)
+        array.push(bos_cont_buy_p_sl, _eSLBCBP)
+        array.push(bos_cont_buy_p_risk, _eRiskBCBP)
+        array.push(bos_cont_buy_p_atr, atrE)
+        array.push(bos_cont_buy_p_bos_bar, _bullBosContBar)
+        array.push(bos_cont_buy_p_pullbacks, _bullBosContPullbacks)
+        array.push(bos_cont_buy_p_level, _bullBosContLevel)
+        _bullBosContBar := na
+        _bullBosContOpen := na
+        _bullBosContClose := na
+        _bullBosContHigh := na
+        _bullBosContLow := na
+        _bullBosContPullbacks := 0
+
+if _bosContSellReady and not _bearBosContLH
+    _eEntryBCSP = close
+    _eSLBCSP = _bearBosContHigh + atrE * entrySLbufATR
+    _eRiskBCSP = _eSLBCSP - _eEntryBCSP
+    if _eRiskBCSP > 0
+        array.push(bos_cont_sell_p_entry_bar, bar_index)
+        array.push(bos_cont_sell_p_high, high)
+        array.push(bos_cont_sell_p_entry, _eEntryBCSP)
+        array.push(bos_cont_sell_p_sl, _eSLBCSP)
+        array.push(bos_cont_sell_p_risk, _eRiskBCSP)
+        array.push(bos_cont_sell_p_atr, atrE)
+        array.push(bos_cont_sell_p_bos_bar, _bearBosContBar)
+        array.push(bos_cont_sell_p_pullbacks, _bearBosContPullbacks)
+        array.push(bos_cont_sell_p_level, _bearBosContLevel)
         _bearBosContBar := na
         _bearBosContOpen := na
         _bearBosContClose := na
