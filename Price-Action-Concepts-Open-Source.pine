@@ -771,6 +771,10 @@ var top_cross = true,  var btm_cross = true
 var itop_cross = true, var ibtm_cross = true
 
 var txt_top = '',  var txt_btm = ''
+var swing_top_bars = array.new_int(0)
+var swing_top_types = array.new_string(0)
+var swing_btm_bars = array.new_int(0)
+var swing_btm_types = array.new_string(0)
 
 //Alerts
 bull_choch_alert = false 
@@ -848,6 +852,11 @@ var label extend_top_lbl = label.new(na, na
 if top
     top_cross := true
     txt_top := top > top_y ? 'HH' : 'LH'
+    array.push(swing_top_bars, n - length)
+    array.push(swing_top_types, txt_top)
+    if array.size(swing_top_bars) > 500
+        array.shift(swing_top_bars)
+        array.shift(swing_top_types)
 
     if show_swings
         top_lbl = label.new(n-length, top, txt_top
@@ -904,6 +913,11 @@ var label extend_btm_lbl = label.new(na, na
 if btm
     btm_cross := true
     txt_btm := btm < btm_y ? 'LL' : 'HL'
+    array.push(swing_btm_bars, n - length)
+    array.push(swing_btm_types, txt_btm)
+    if array.size(swing_btm_bars) > 500
+        array.shift(swing_btm_bars)
+        array.shift(swing_btm_types)
     
     if show_swings
         btm_lbl = label.new(n - length, btm, txt_btm
@@ -1948,10 +1962,85 @@ f_bos_cont_confirm_candle(_isBuy) =>
     _dirOk = _isBuy ? close > open : close < open
     _dirOk and _bodyOk and _wickOk
 
+f_has_swing_top_between(_fromBar, _toBar, _swingType) =>
+    bool _found = false
+    _count = array.size(swing_top_bars)
+    if _count > 0
+        for _i = 0 to _count - 1
+            _swingBar = array.get(swing_top_bars, _i)
+            _type = array.get(swing_top_types, _i)
+            if _swingBar > _fromBar and _swingBar < _toBar and _type == _swingType
+                _found := true
+    _found
+
+f_has_swing_btm_between(_fromBar, _toBar, _swingType) =>
+    bool _found = false
+    _count = array.size(swing_btm_bars)
+    if _count > 0
+        for _i = 0 to _count - 1
+            _swingBar = array.get(swing_btm_bars, _i)
+            _type = array.get(swing_btm_types, _i)
+            if _swingBar > _fromBar and _swingBar < _toBar and _type == _swingType
+                _found := true
+    _found
+
 //-----------------------------------------------------------------------------
 // BUY RULE - dung chinh nhan LL/HL tren chart
 //-----------------------------------------------------------------------------
+var buy_p_src_bar = array.new_int(0)
+var buy_p_entry_bar = array.new_int(0)
+var buy_p_entry = array.new_float(0)
+var buy_p_sl = array.new_float(0)
+var buy_p_risk = array.new_float(0)
+var buy_p_src_type = array.new_string(0)
+var buy_p_src_price = array.new_float(0)
+var buy_p_choch_offset = array.new_int(0)
+var buy_p_entry_offset = array.new_int(0)
+var buy_p_entry_low = array.new_float(0)
+
+var sell_p_src_bar = array.new_int(0)
+var sell_p_entry_bar = array.new_int(0)
+var sell_p_entry = array.new_float(0)
+var sell_p_sl = array.new_float(0)
+var sell_p_risk = array.new_float(0)
+var sell_p_src_type = array.new_string(0)
+var sell_p_src_price = array.new_float(0)
+var sell_p_choch_offset = array.new_int(0)
+var sell_p_entry_offset = array.new_int(0)
+var sell_p_entry_high = array.new_float(0)
+
 _buySig = false
+
+_buyPendingCount = array.size(buy_p_src_bar)
+if _buyPendingCount > 0
+    for _j = 0 to _buyPendingCount - 1
+        _idx = _buyPendingCount - 1 - _j
+        _pSrcBar = array.get(buy_p_src_bar, _idx)
+        _pEntryBar = array.get(buy_p_entry_bar, _idx)
+        if bar_index >= _pEntryBar + length
+            if not f_has_swing_top_between(_pSrcBar, _pEntryBar, 'LH')
+                _pEntry = array.get(buy_p_entry, _idx)
+                _pSL = array.get(buy_p_sl, _idx)
+                _pRisk = array.get(buy_p_risk, _idx)
+                _pSrcType = array.get(buy_p_src_type, _idx)
+                _pSrcPrice = array.get(buy_p_src_price, _idx)
+                _pChochOffset = array.get(buy_p_choch_offset, _idx)
+                _pEntryOffset = array.get(buy_p_entry_offset, _idx)
+                _pBarsChoCHtoBuy = _pEntryOffset - _pChochOffset
+                _reason = "LY DO BUY:\n" + _pSrcType + " label @ " + f_px(_pSrcPrice) + "\nCHoCH tang sau " + _pSrcType + ": " + str.tostring(_pChochOffset) + " nen\nPullback: YES\nKhong co LH giua " + _pSrcType + " va nen xac nhan\nNen xanh xac nhan sau CHoCH: " + str.tostring(_pBarsChoCHtoBuy) + " nen\n" + _pSrcType + " -> B: " + str.tostring(_pEntryOffset) + "/" + str.tostring(maxBarsLLtoEntry) + " nen"
+                _tip = "BUY\n-----------------\nEntry: " + f_px(_pEntry) + "\nSL:    " + f_px(_pSL) + "  (duoi nen xanh, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_pRisk) + "\n-----------------\n" + _reason
+                label.new(_pEntryBar, array.get(buy_p_entry_low, _idx), "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+                _buySig := true
+            array.remove(buy_p_src_bar, _idx)
+            array.remove(buy_p_entry_bar, _idx)
+            array.remove(buy_p_entry, _idx)
+            array.remove(buy_p_sl, _idx)
+            array.remove(buy_p_risk, _idx)
+            array.remove(buy_p_src_type, _idx)
+            array.remove(buy_p_src_price, _idx)
+            array.remove(buy_p_choch_offset, _idx)
+            array.remove(buy_p_entry_offset, _idx)
+            array.remove(buy_p_entry_low, _idx)
 
 if showEntries and btm and (txt_btm == 'LL' or txt_btm == 'HL')
     _llBar = bar_index - length
@@ -1980,15 +2069,29 @@ if showEntries and btm and (txt_btm == 'LL' or txt_btm == 'HL')
 
     if not na(_entryOffsetL)
         _entryBackL = bar_index - (_llBar + _entryOffsetL)
+        _entryBarL = _llBar + _entryOffsetL
         _eEntryL = close[_entryBackL]
         _eSLL = low[_entryBackL] - atrE[_entryBackL] * entrySLbufATR
         _eRiskL = _eEntryL - _eSLL
         if _eRiskL > 0
-            _buySig := true
-            _barsChoCHtoBuy = _entryOffsetL - _chochOffsetL
-            _reason = "LY DO BUY:\n" + txt_btm + " label @ " + f_px(btm) + "\nCHoCH tang sau " + txt_btm + ": " + str.tostring(_chochOffsetL) + " nen\nPullback: YES\nNen xanh xac nhan sau CHoCH: " + str.tostring(_barsChoCHtoBuy) + " nen\n" + txt_btm + " -> B: " + str.tostring(_entryOffsetL) + "/" + str.tostring(maxBarsLLtoEntry) + " nen"
-            _tip = "BUY\n-----------------\nEntry: " + f_px(_eEntryL) + "\nSL:    " + f_px(_eSLL) + "  (duoi nen xanh, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskL) + "\n-----------------\n" + _reason
-            label.new(_llBar + _entryOffsetL, low[_entryBackL], "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+            if _entryBackL >= length
+                if not f_has_swing_top_between(_llBar, _entryBarL, 'LH')
+                    _buySig := true
+                    _barsChoCHtoBuy = _entryOffsetL - _chochOffsetL
+                    _reason = "LY DO BUY:\n" + txt_btm + " label @ " + f_px(btm) + "\nCHoCH tang sau " + txt_btm + ": " + str.tostring(_chochOffsetL) + " nen\nPullback: YES\nKhong co LH giua " + txt_btm + " va nen xac nhan\nNen xanh xac nhan sau CHoCH: " + str.tostring(_barsChoCHtoBuy) + " nen\n" + txt_btm + " -> B: " + str.tostring(_entryOffsetL) + "/" + str.tostring(maxBarsLLtoEntry) + " nen"
+                    _tip = "BUY\n-----------------\nEntry: " + f_px(_eEntryL) + "\nSL:    " + f_px(_eSLL) + "  (duoi nen xanh, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskL) + "\n-----------------\n" + _reason
+                    label.new(_entryBarL, low[_entryBackL], "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+            else
+                array.push(buy_p_src_bar, _llBar)
+                array.push(buy_p_entry_bar, _entryBarL)
+                array.push(buy_p_entry, _eEntryL)
+                array.push(buy_p_sl, _eSLL)
+                array.push(buy_p_risk, _eRiskL)
+                array.push(buy_p_src_type, txt_btm)
+                array.push(buy_p_src_price, btm)
+                array.push(buy_p_choch_offset, _chochOffsetL)
+                array.push(buy_p_entry_offset, _entryOffsetL)
+                array.push(buy_p_entry_low, low[_entryBackL])
 
 alertcondition(_buySig, "Entry BUY", "PAC Entry: BUY signal")
 
@@ -1996,6 +2099,37 @@ alertcondition(_buySig, "Entry BUY", "PAC Entry: BUY signal")
 // SELL RULE - dung chinh nhan HH/LH tren chart
 //-----------------------------------------------------------------------------
 _sellSig = false
+
+_sellPendingCount = array.size(sell_p_src_bar)
+if _sellPendingCount > 0
+    for _j = 0 to _sellPendingCount - 1
+        _idx = _sellPendingCount - 1 - _j
+        _pSrcBar = array.get(sell_p_src_bar, _idx)
+        _pEntryBar = array.get(sell_p_entry_bar, _idx)
+        if bar_index >= _pEntryBar + length
+            if not f_has_swing_btm_between(_pSrcBar, _pEntryBar, 'HL')
+                _pEntry = array.get(sell_p_entry, _idx)
+                _pSL = array.get(sell_p_sl, _idx)
+                _pRisk = array.get(sell_p_risk, _idx)
+                _pSrcType = array.get(sell_p_src_type, _idx)
+                _pSrcPrice = array.get(sell_p_src_price, _idx)
+                _pChochOffset = array.get(sell_p_choch_offset, _idx)
+                _pEntryOffset = array.get(sell_p_entry_offset, _idx)
+                _pBarsChoCHtoSell = _pEntryOffset - _pChochOffset
+                _reason = "LY DO SELL:\n" + _pSrcType + " label @ " + f_px(_pSrcPrice) + "\nCHoCH giam sau " + _pSrcType + ": " + str.tostring(_pChochOffset) + " nen\nPullback: YES\nKhong co HL giua " + _pSrcType + " va nen xac nhan\nNen do xac nhan sau CHoCH: " + str.tostring(_pBarsChoCHtoSell) + " nen\n" + _pSrcType + " -> S: " + str.tostring(_pEntryOffset) + "/" + str.tostring(maxBarsHHtoEntry) + " nen"
+                _tip = "SELL\n-----------------\nEntry: " + f_px(_pEntry) + "\nSL:    " + f_px(_pSL) + "  (tren nen do, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_pRisk) + "\n-----------------\n" + _reason
+                label.new(_pEntryBar, array.get(sell_p_entry_high, _idx), "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+                _sellSig := true
+            array.remove(sell_p_src_bar, _idx)
+            array.remove(sell_p_entry_bar, _idx)
+            array.remove(sell_p_entry, _idx)
+            array.remove(sell_p_sl, _idx)
+            array.remove(sell_p_risk, _idx)
+            array.remove(sell_p_src_type, _idx)
+            array.remove(sell_p_src_price, _idx)
+            array.remove(sell_p_choch_offset, _idx)
+            array.remove(sell_p_entry_offset, _idx)
+            array.remove(sell_p_entry_high, _idx)
 
 if showEntries and top and (txt_top == 'HH' or txt_top == 'LH')
     _hhBar = bar_index - length
@@ -2024,15 +2158,29 @@ if showEntries and top and (txt_top == 'HH' or txt_top == 'LH')
 
     if not na(_entryOffsetS)
         _entryBackS = bar_index - (_hhBar + _entryOffsetS)
+        _entryBarS = _hhBar + _entryOffsetS
         _eEntryS = close[_entryBackS]
         _eSLS = high[_entryBackS] + atrE[_entryBackS] * entrySLbufATR
         _eRiskS = _eSLS - _eEntryS
         if _eRiskS > 0
-            _sellSig := true
-            _barsChoCHtoSell = _entryOffsetS - _chochOffsetS
-            _reason = "LY DO SELL:\n" + txt_top + " label @ " + f_px(top) + "\nCHoCH giam sau " + txt_top + ": " + str.tostring(_chochOffsetS) + " nen\nPullback: YES\nNen do xac nhan sau CHoCH: " + str.tostring(_barsChoCHtoSell) + " nen\n" + txt_top + " -> S: " + str.tostring(_entryOffsetS) + "/" + str.tostring(maxBarsHHtoEntry) + " nen"
-            _tip = "SELL\n-----------------\nEntry: " + f_px(_eEntryS) + "\nSL:    " + f_px(_eSLS) + "  (tren nen do, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskS) + "\n-----------------\n" + _reason
-            label.new(_hhBar + _entryOffsetS, high[_entryBackS], "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+            if _entryBackS >= length
+                if not f_has_swing_btm_between(_hhBar, _entryBarS, 'HL')
+                    _sellSig := true
+                    _barsChoCHtoSell = _entryOffsetS - _chochOffsetS
+                    _reason = "LY DO SELL:\n" + txt_top + " label @ " + f_px(top) + "\nCHoCH giam sau " + txt_top + ": " + str.tostring(_chochOffsetS) + " nen\nPullback: YES\nKhong co HL giua " + txt_top + " va nen xac nhan\nNen do xac nhan sau CHoCH: " + str.tostring(_barsChoCHtoSell) + " nen\n" + txt_top + " -> S: " + str.tostring(_entryOffsetS) + "/" + str.tostring(maxBarsHHtoEntry) + " nen"
+                    _tip = "SELL\n-----------------\nEntry: " + f_px(_eEntryS) + "\nSL:    " + f_px(_eSLS) + "  (tren nen do, buffer " + str.tostring(entrySLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskS) + "\n-----------------\n" + _reason
+                    label.new(_entryBarS, high[_entryBackS], "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+            else
+                array.push(sell_p_src_bar, _hhBar)
+                array.push(sell_p_entry_bar, _entryBarS)
+                array.push(sell_p_entry, _eEntryS)
+                array.push(sell_p_sl, _eSLS)
+                array.push(sell_p_risk, _eRiskS)
+                array.push(sell_p_src_type, txt_top)
+                array.push(sell_p_src_price, top)
+                array.push(sell_p_choch_offset, _chochOffsetS)
+                array.push(sell_p_entry_offset, _entryOffsetS)
+                array.push(sell_p_entry_high, high[_entryBackS])
 
 alertcondition(_sellSig, "Entry SELL", "PAC Entry: SELL signal")
 
