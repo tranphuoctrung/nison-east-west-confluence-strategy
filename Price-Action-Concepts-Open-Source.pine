@@ -1918,6 +1918,15 @@ bosContFvgNearATR = input.float(0.0, "Khoang cach FVG gan nen xac nhan (ATR)", m
 maxBarsBosContSwing = input.int(15, "Max nen tu HL/LH gan nhat -> xac nhan", minval = 1, maxval = 200, group = grpEC)
 maxAtrBosContSwing = input.float(3.0, "Max ATR tu HL/LH gan nhat -> xac nhan", minval = 0.1, step = 0.1, group = grpEC)
 
+// --- Buy low, Sell high rule ---
+grpELH = "Entry - Buy low, Sell high"
+showBuyLowSellHigh = input.bool(true, "Bat rule Buy low, Sell high", group = grpELH)
+maxBarsLowHighPullback = input.int(5, "Max nen tu LL/HH -> pullback", minval = 2, maxval = 50, group = grpELH)
+lowHighPullbackNumber = input.int(1, "Max so nen pullback kiem tra", minval = 1, maxval = 20, group = grpELH)
+lowHighPullbackMode = input.string("Close trong than HH/LL", "Dieu kien pullback", options = ["Rau cham vung gia HH/LL", "Close trong than HH/LL", "Rau cach rau HH/LL theo ATR"], group = grpELH)
+lowHighPullbackNearATR = input.float(0.2, "Khoang cach rau pullback toi HH/LL (ATR)", minval = 0.0, step = 0.05, group = grpELH)
+lowHighSLbufATR = input.float(0.2, "SL buffer ATR", minval = 0.0, step = 0.05, group = grpELH)
+
 // --- Chung (SL/label) ---
 entrySLbufATR      = input.float(0.3,  "SL buffer ATR (duoi nen xanh / tren nen do)", minval = 0.0, step = 0.05, group = grpE)
 confirmBreakMode   = input.string("Vuot 80%", "Che do nen xac nhan", options = ["Vuot 50%", "Vuot 80%", "Vuot than", "Vuot dinh/day"], group = grpE)
@@ -2040,6 +2049,81 @@ f_has_recent_swing_btm(_toBar, _toPrice, _atr, _swingType, _maxBars, _maxAtr) =>
             if _swingBar <= _toBar and _toBar - _swingBar <= _maxBars and _type == _swingType and _atrOk
                 _found := true
     _found
+
+//-----------------------------------------------------------------------------
+// BUY LOW, SELL HIGH - dung nhan LL/HL/HH/LH tren chart
+//-----------------------------------------------------------------------------
+_lowHighBuySig = false
+_lowHighSellSig = false
+
+if showEntries and showBuyLowSellHigh and btm and (txt_btm == 'LL' or txt_btm == 'HL')
+    _llBarBL = bar_index - length
+    _llBackBL = length
+    int _entryOffsetBL = na
+    int _pullbackCountBL = 0
+    int _entryPullbackNoBL = na
+
+    for _off = 1 to maxBarsLowHighPullback
+        _barsBack = bar_index - (_llBarBL + _off)
+        if na(_entryOffsetBL) and _barsBack >= 0 and close[_barsBack] < open[_barsBack]
+            _pullbackCountBL += 1
+            _llBodyLowBL = math.min(open[_llBackBL], close[_llBackBL])
+            _llBodyHighBL = math.max(open[_llBackBL], close[_llBackBL])
+            _wickTouchBL = high[_barsBack] >= low[_llBackBL] and low[_barsBack] <= high[_llBackBL]
+            _closeInBodyBL = close[_barsBack] >= _llBodyLowBL and close[_barsBack] <= _llBodyHighBL
+            _rangeGapBL = high[_barsBack] < low[_llBackBL] ? low[_llBackBL] - high[_barsBack] : low[_barsBack] > high[_llBackBL] ? low[_barsBack] - high[_llBackBL] : 0.0
+            _wickNearBL = _rangeGapBL <= atrE[_barsBack] * lowHighPullbackNearATR
+            _pullbackOkBL = lowHighPullbackMode == "Rau cham vung gia HH/LL" ? _wickTouchBL : lowHighPullbackMode == "Rau cach rau HH/LL theo ATR" ? _wickNearBL : _closeInBodyBL
+            if _pullbackCountBL <= lowHighPullbackNumber and _pullbackOkBL
+                _entryOffsetBL := _off
+                _entryPullbackNoBL := _pullbackCountBL
+
+    if not na(_entryOffsetBL)
+        _entryBackBL = bar_index - (_llBarBL + _entryOffsetBL)
+        _entryBarBL = _llBarBL + _entryOffsetBL
+        _eEntryBL = close[_entryBackBL]
+        _eSLBL = low[_llBackBL] - atrE[_llBackBL] * lowHighSLbufATR
+        _eRiskBL = _eEntryBL - _eSLBL
+        if _eRiskBL > 0
+            _tip = "BUY - Buy low, Sell high\n-----------------\nEntry: " + f_px(_eEntryBL) + "\nSL:    " + f_px(_eSLBL) + "  (duoi day " + txt_btm + ", buffer " + str.tostring(lowHighSLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskBL) + "\n-----------------\nNguon: " + txt_btm + "\nNen pullback do hop le thu " + str.tostring(_entryPullbackNoBL) + "/" + str.tostring(lowHighPullbackNumber) + "\nKhoang cach " + txt_btm + " -> entry: " + str.tostring(_entryOffsetBL) + "/" + str.tostring(maxBarsLowHighPullback) + " nen\nDieu kien: " + lowHighPullbackMode
+            label.new(_entryBarBL, low[_entryBackBL], "B", style = label.style_label_up, color = color.new(#089981, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+            _lowHighBuySig := true
+
+if showEntries and showBuyLowSellHigh and top and (txt_top == 'HH' or txt_top == 'LH')
+    _hhBarSH = bar_index - length
+    _hhBackSH = length
+    int _entryOffsetSH = na
+    int _pullbackCountSH = 0
+    int _entryPullbackNoSH = na
+
+    for _off = 1 to maxBarsLowHighPullback
+        _barsBack = bar_index - (_hhBarSH + _off)
+        if na(_entryOffsetSH) and _barsBack >= 0 and close[_barsBack] > open[_barsBack]
+            _pullbackCountSH += 1
+            _hhBodyLowSH = math.min(open[_hhBackSH], close[_hhBackSH])
+            _hhBodyHighSH = math.max(open[_hhBackSH], close[_hhBackSH])
+            _wickTouchSH = high[_barsBack] >= low[_hhBackSH] and low[_barsBack] <= high[_hhBackSH]
+            _closeInBodySH = close[_barsBack] >= _hhBodyLowSH and close[_barsBack] <= _hhBodyHighSH
+            _rangeGapSH = high[_barsBack] < low[_hhBackSH] ? low[_hhBackSH] - high[_barsBack] : low[_barsBack] > high[_hhBackSH] ? low[_barsBack] - high[_hhBackSH] : 0.0
+            _wickNearSH = _rangeGapSH <= atrE[_barsBack] * lowHighPullbackNearATR
+            _pullbackOkSH = lowHighPullbackMode == "Rau cham vung gia HH/LL" ? _wickTouchSH : lowHighPullbackMode == "Rau cach rau HH/LL theo ATR" ? _wickNearSH : _closeInBodySH
+            if _pullbackCountSH <= lowHighPullbackNumber and _pullbackOkSH
+                _entryOffsetSH := _off
+                _entryPullbackNoSH := _pullbackCountSH
+
+    if not na(_entryOffsetSH)
+        _entryBackSH = bar_index - (_hhBarSH + _entryOffsetSH)
+        _entryBarSH = _hhBarSH + _entryOffsetSH
+        _eEntrySH = close[_entryBackSH]
+        _eSLSH = high[_hhBackSH] + atrE[_hhBackSH] * lowHighSLbufATR
+        _eRiskSH = _eSLSH - _eEntrySH
+        if _eRiskSH > 0
+            _tip = "SELL - Buy low, Sell high\n-----------------\nEntry: " + f_px(_eEntrySH) + "\nSL:    " + f_px(_eSLSH) + "  (tren dinh " + txt_top + ", buffer " + str.tostring(lowHighSLbufATR, "#.##") + "*ATR)\nRisk:  " + f_px(_eRiskSH) + "\n-----------------\nNguon: " + txt_top + "\nNen pullback xanh hop le thu " + str.tostring(_entryPullbackNoSH) + "/" + str.tostring(lowHighPullbackNumber) + "\nKhoang cach " + txt_top + " -> entry: " + str.tostring(_entryOffsetSH) + "/" + str.tostring(maxBarsLowHighPullback) + " nen\nDieu kien: " + lowHighPullbackMode
+            label.new(_entryBarSH, high[_entryBackSH], "S", style = label.style_label_down, color = color.new(#f23645, 0), textcolor = color.white, size = _lblSz, tooltip = _tip)
+            _lowHighSellSig := true
+
+alertcondition(_lowHighBuySig, "Entry BUY - Buy low, Sell high", "PAC Entry: BUY low signal")
+alertcondition(_lowHighSellSig, "Entry SELL - Buy low, Sell high", "PAC Entry: SELL high signal")
 
 //-----------------------------------------------------------------------------
 // BUY RULE - dung chinh nhan LL/HL tren chart
